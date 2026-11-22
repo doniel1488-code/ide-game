@@ -26,7 +26,7 @@ func _key(key_code: int, down: bool) -> InputEventKey:
 
 
 func _run() -> void:
-	var game := GAME_SCENE.instantiate() as LumenGame
+	var game: Variant = GAME_SCENE.instantiate()
 	root.add_child(game)
 	await process_frame
 	if not _expect(game.mode == GameMode.MENU, "native project opens on its main menu"):
