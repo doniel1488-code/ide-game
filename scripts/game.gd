@@ -47,6 +47,7 @@ var invulnerability := 0.0
 var dash_direction := Vector3.FORWARD
 var gate_active := false
 var campaign_started := false
+var campaign_completed := false
 var sound_enabled := true
 var rng := RandomNumberGenerator.new()
 var pressed: Dictionary = {}
@@ -305,7 +306,7 @@ func _show(next_mode: int) -> void:
 			ui_title.text = "✳  LUMEN DRIFT"
 			ui_text.text = "2189 год. Сеть маяков Lumen замолчала. Пилот спасательного корабля и бортовой ИИ Лира отправляются к пятнадцати узлам, чтобы узнать, кто отвечает из темноты."
 			ui_hint.text = "5 ГЛАВ · 15 МИССИЙ · КОНТРОЛЬНЫЕ ТОЧКИ"
-			ui_button.text = "ПРОДОЛЖИТЬ КАМПАНИЮ" if campaign_started else "НАЧАТЬ КАМПАНИЮ"
+			ui_button.text = "ПОСМОТРЕТЬ ЭПИЛОГ" if campaign_completed else ("ПРОДОЛЖИТЬ КАМПАНИЮ" if campaign_started else "НАЧАТЬ КАМПАНИЮ")
 		Mode.BRIEFING:
 			ui_title.text = "%s · МИССИЯ %02d" % [CHAPTERS[_chapter()], mission_index + 1]
 			ui_text.text = "%s\n\n%s\n\nЗадача: %s" % [TITLES[mission_index], BRIEFS[mission_index], _objective_text()]
@@ -338,6 +339,9 @@ func _show(next_mode: int) -> void:
 func _primary() -> void:
 	match mode:
 		Mode.MENU:
+			if campaign_completed:
+				_show(Mode.WON)
+				return
 			if not campaign_started:
 				mission_index = 0
 				score = 0
@@ -364,6 +368,7 @@ func _primary() -> void:
 			mission_index = 0
 			score = 0
 			module_rank = 0
+			campaign_completed = false
 			campaign_started = true
 			_save(0)
 			_show(Mode.BRIEFING)
@@ -684,8 +689,10 @@ func _toggle_sound() -> void:
 	if sound_enabled:
 		_tone(660.0, 0.1)
 
-func _save(checkpoint: int) -> void:
+	func _save(checkpoint: int) -> void:
+	campaign_completed = checkpoint >= MISSION_COUNT
 	var cfg := ConfigFile.new()
+	cfg.set_value("campaign", "complete", campaign_completed)
 	cfg.set_value("campaign", "checkpoint", clampi(checkpoint, 0, MISSION_COUNT))
 	cfg.set_value("campaign", "score", score)
 	cfg.set_value("campaign", "best_score", best_score)
@@ -695,11 +702,12 @@ func _save(checkpoint: int) -> void:
 func _load_save() -> void:
 	var cfg := ConfigFile.new()
 	if cfg.load(SAVE_PATH) == OK:
+		campaign_completed = bool(cfg.get_value("campaign", "complete", false))
 		mission_index = clampi(int(cfg.get_value("campaign", "checkpoint", 0)), 0, MISSION_COUNT - 1)
 		score = int(cfg.get_value("campaign", "score", 0))
 		best_score = int(cfg.get_value("campaign", "best_score", 0))
 		module_rank = clampi(int(cfg.get_value("campaign", "module_rank", 0)), 0, 5)
-		campaign_started = mission_index > 0 or score > 0
+		campaign_started = campaign_completed or mission_index > 0 or score > 0
 
 func _chapter() -> int:
 	return clampi(int(float(mission_index) / 3.0), 0, 4)
