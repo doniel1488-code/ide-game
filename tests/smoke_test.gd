@@ -88,6 +88,11 @@ func _run() -> void:
 	game._primary()
 	if not _expect(game.mode == GameMode.WON, "fifteen missions reach the campaign ending"):
 		return
+	if not _expect(game.module_rank == 4, "four chapter clears unlock four ship modules"):
+		return
+	var save_check := ConfigFile.new()
+	if not _expect(save_check.load(game.SAVE_PATH) == OK and int(save_check.get_value("campaign", "module_rank", -1)) == 4, "ship module upgrades persist in the campaign save"):
+		return
 
 	game._show(GameMode.PLAYING)
 	game.lives = 1
