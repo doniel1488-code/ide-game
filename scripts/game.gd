@@ -75,6 +75,7 @@ var tone_phase := 0.0
 var gate: Node3D
 var archive_choice := true
 var preview_path := ""
+var preview_menu := false
 
 func _ready() -> void:
 	rng.randomize()
@@ -87,8 +88,11 @@ func _ready() -> void:
 	for argument in OS.get_cmdline_user_args():
 		if argument.begins_with("--capture-preview="):
 			preview_path = argument.trim_prefix("--capture-preview=")
+		elif argument == "--capture-menu":
+			preview_menu = true
 	if not preview_path.is_empty():
-		_start_mission()
+		if not preview_menu:
+			_start_mission()
 		call_deferred("_capture_preview")
 
 func _capture_preview() -> void:
