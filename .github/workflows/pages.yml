@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Explain Pages is not enabled
-        run: echo "The website source remains in the private repository. Set repository variable DEPLOY_PAGES=true and enable GitHub Pages to publish it."
+        run: echo "The website source is ready. Enable GitHub Pages and set the repository variable DEPLOY_PAGES=true to publish it."
 
   deploy:
     if: vars.DEPLOY_PAGES == 'true'
