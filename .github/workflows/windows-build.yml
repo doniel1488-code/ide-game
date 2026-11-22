@@ -50,28 +50,28 @@ jobs:
         continue-on-error: true
         shell: pwsh
         run: |
-          & ./scripts/ci/run_godot.ps1 -Name version --version
+          & ./scripts/ci/run_godot.ps1 -Name version -GodotArguments @('--version')
 
       - name: Import Godot project in headless editor
         id: godot_import
         continue-on-error: true
         shell: pwsh
         run: |
-          & ./scripts/ci/run_godot.ps1 -Name import --headless --editor --path . --quit --verbose
+          & ./scripts/ci/run_godot.ps1 -Name import -GodotArguments @('--headless', '--editor', '--path', '.', '--quit', '--verbose')
 
       - name: Start main scene headlessly
         id: godot_scene
         continue-on-error: true
         shell: pwsh
         run: |
-          & ./scripts/ci/run_godot.ps1 -Name scene --headless --path . --quit-after 3 --verbose
+          & ./scripts/ci/run_godot.ps1 -Name scene -GodotArguments @('--headless', '--path', '.', '--quit-after', '3', '--verbose')
 
       - name: Run campaign smoke test
         id: godot_smoke
         continue-on-error: true
         shell: pwsh
         run: |
-          & ./scripts/ci/run_godot.ps1 -Name smoke --headless --path . --script res://tests/smoke_test.gd --verbose
+          & ./scripts/ci/run_godot.ps1 -Name smoke -GodotArguments @('--headless', '--path', '.', '--script', 'res://tests/smoke_test.gd', '--verbose')
           $gameCode = Get-Content 'scripts/game.gd' -Raw
           if ($gameCode -match 'HTTPRequest|HTTPClient|WebSocketPeer|TCPServer|StreamPeerTCP') { throw 'Game code must not require network access.' }
 
