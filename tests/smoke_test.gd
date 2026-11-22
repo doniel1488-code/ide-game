@@ -149,9 +149,6 @@ func _run() -> void:
 		return
 
 	print("All Lumen Drift 3D campaign smoke checks passed.")
-	game.sound_player.stop()
-	game.sound_playback = null
-	await create_timer(0.5).timeout
 	game.queue_free()
 	await process_frame
 	quit(0)
