@@ -22,7 +22,7 @@ func _run() -> void:
 		return
 	if not _expect(game.player is CharacterBody3D and game.camera is Camera3D, "pilot and follow camera use native 3D nodes"):
 		return
-	if not _expect(game.ship.get_child_count() >= 6, "ship is built from multiple 3D meshes"):
+	if not _expect(game.ship.get_node_or_null("Hull") is Node3D and game.ship.find_children("*", "MeshInstance3D", true, false).size() >= 3, "ship loads its GLB hull and separate exhaust geometry"):
 		return
 	game._primary()
 	if not _expect(game.mode == GameMode.BRIEFING, "campaign begins with story briefing"):
@@ -89,8 +89,17 @@ func _run() -> void:
 	if not _expect(game.objective_progress == game.objective_goal and game.gate_active, "activating every relay through F opens the exit"):
 		return
 
-	game.mission_index = 1
-	game._start_mission()
+	game.dash_remaining = 0.0
+	game.pressed.clear()
+	game.player.position = game.gate.position
+	game.player.velocity = Vector3.ZERO
+	game._physics_process(0.016)
+	if not _expect(game.mode == GameMode.INTERMISSION, "completed objective permits exit from mission 1"):
+		return
+	game._primary()
+	if not _expect(game.mission_index == 1 and game.mode == GameMode.BRIEFING, "exit advances chapter-one briefing"):
+		return
+	game._primary()
 	game.enemies.clear()
 	game.player.position = game.cores[0].position
 	game._update_objectives()
@@ -103,12 +112,24 @@ func _run() -> void:
 	if not _expect(game.objective_progress == game.objective_goal and game.gate_active, "collecting every memory crystal opens the exit"):
 		return
 
-	game.mission_index = 2
-	game._start_mission()
+	game.player.position = game.gate.position
+	game.player.velocity = Vector3.ZERO
+	game._physics_process(0.016)
+	if not _expect(game.mode == GameMode.INTERMISSION, "completed objective permits exit from mission 2"):
+		return
+	game._primary()
+	if not _expect(game.mission_index == 2 and game.mode == GameMode.BRIEFING, "exit advances chapter-one briefing"):
+		return
+	game._primary()
 	game.enemies.clear()
-	game.defense_time = 89.9
-	game._physics_process(0.2)
+	for frame in range(451):
+		game._physics_process(0.2)
 	if not _expect(game.gate_active, "surviving a defense objective opens the exit"):
+		return
+
+	game.player.position = game.gate.position
+	game._physics_process(0.016)
+	if not _expect(game.mode == GameMode.INTERMISSION, "defense exit completes Silent Edge"):
 		return
 
 	game.mission_index = 0

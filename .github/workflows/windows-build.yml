@@ -208,7 +208,9 @@ jobs:
             @{ Path = (Join-Path $previewDir 'LumenDrift-menu.png'); Menu = $true; Mode = 'menu' },
             @{ Path = (Join-Path $previewDir 'LumenDrift-chapter-one.png'); Mode = 'overview' },
             @{ Path = (Join-Path $previewDir 'LumenDrift-kepler.png'); Mode = 'ship' },
-            @{ Path = (Join-Path $previewDir 'LumenDrift-relay.png'); Mode = 'relay' }
+            @{ Path = (Join-Path $previewDir 'LumenDrift-relay.png'); Mode = 'relay' },
+            @{ Path = (Join-Path $previewDir 'LumenDrift-flight.png'); Mode = 'flight' },
+            @{ Path = (Join-Path $previewDir 'LumenDrift-asteroids.png'); Mode = 'asteroids' }
           )
           foreach ($capture in $captures) {
             Remove-Item -LiteralPath $capture.Path -Force -ErrorAction SilentlyContinue
@@ -260,6 +262,8 @@ jobs:
             dist/LumenDrift-chapter-one.png
             dist/LumenDrift-kepler.png
             dist/LumenDrift-relay.png
+            dist/LumenDrift-flight.png
+            dist/LumenDrift-asteroids.png
             website/
           if-no-files-found: error
           retention-days: 30

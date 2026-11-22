@@ -42,17 +42,24 @@ func _make_space_panorama(chapter: int, accent: Color) -> Texture2D:
 	var image := Image.create(width, height, false, Image.FORMAT_RGB8)
 	var base := Color("#030713")
 	var nebula_tint: Color = accent.lerp(Color("#8370bd"), 0.28)
+	var dust := FastNoiseLite.new()
+	dust.seed = 14317 + chapter * 31
+	dust.frequency = 0.046
+	dust.fractal_octaves = 4
 	for y in range(height):
 		var v := float(y) / float(height)
 		for x in range(width):
 			var u := float(x) / float(width)
 			var band_center := 0.50 + 0.10 * sin(u * TAU * 2.0 + sin(u * TAU * 3.0) * 0.4)
 			var broad_cloud := exp(-pow((v - band_center) / 0.16, 2.0))
-			var wisp := 0.5 + 0.5 * sin(u * TAU * 5.0 + v * 17.0 + sin(v * 21.0))
-			var dark_lane := 0.5 + 0.5 * sin(u * TAU * 3.0 - v * 11.0)
-			var cloud := clampf(broad_cloud * (0.26 + wisp * 0.48 + dark_lane * 0.16), 0.0, 0.72)
-			var pixel := base.lerp(Color("#111a31"), cloud * 0.62)
-			pixel = pixel.lerp(nebula_tint, cloud * 0.42)
+			var azimuth := u * TAU
+			var polar := v * PI
+			var direction := Vector3(cos(azimuth) * sin(polar), cos(polar), sin(azimuth) * sin(polar))
+			var gas := dust.get_noise_3dv(direction * 168.0)
+			var grain := dust.get_noise_3dv(direction * 420.0 + Vector3(35, -71, 12))
+			var cloud := broad_cloud * smoothstep(-0.16, 0.52, gas + grain * 0.28)
+			var pixel := base.lerp(Color("#101629"), cloud * 0.55)
+			pixel = pixel.lerp(nebula_tint, cloud * 0.34)
 			image.set_pixel(x, y, pixel)
 	var sky_rng := RandomNumberGenerator.new()
 	sky_rng.seed = 6619 + chapter * 103

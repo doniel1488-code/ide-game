@@ -122,17 +122,28 @@ func _capture_preview() -> void:
 
 func _configure_preview() -> void:
 	get_window().size = Vector2i(1280, 800)
+	if preview_mode == "flight":
+		pressed[KEY_W] = true
+		pressed[KEY_D] = true
+		player.position = Vector3(-10, 0, 7)
+		camera.reset_to(player.position)
+		return
 	set_physics_process(false)
 	_update_hud()
 	if preview_mode == "ship":
-		camera.position = Vector3(4.8, 3.4, 6.0)
+		camera.position = Vector3(4.0, 3.6, -6.2)
 		camera.look_at(Vector3(0, 0.5, 0))
 		hud.hide()
 		comms.hide()
 	elif preview_mode == "relay":
 		var point: Vector3 = SilentEdge.RELAYS[0]
-		camera.position = point + Vector3(5, 4, 7)
+		camera.position = point + Vector3(5, 4, -7)
 		camera.look_at(point + Vector3.UP * 1.4)
+		hud.hide()
+		comms.hide()
+	elif preview_mode == "asteroids":
+		camera.position = Vector3(-19, 6, 13)
+		camera.look_at(Vector3(-12, 0, -7))
 		hud.hide()
 		comms.hide()
 	elif preview_mode == "overview":
@@ -488,6 +499,8 @@ func _spawn_objectives() -> void:
 				pos.x += 9
 			var target := _area("RelayNode", pos, 1.15)
 			_build_relay_silhouette(target, Vector3.ZERO, PALETTE[_chapter()], false)
+			if _chapter() == 0:
+				_relay_marker(target, i)
 			targets.append(target)
 
 func _spawn_enemies(count: int) -> void:
@@ -504,7 +517,6 @@ func _spawn_enemies(count: int) -> void:
 		enemy.add_child(collider)
 		var visual = preload("res://scenes/environment/drone.tscn").instantiate()
 		visual.wisp = i % 2 == 1
-		visual.variant = i
 		enemy.add_child(visual)
 		arena.add_child(enemy)
 		enemies.append({"node": enemy, "speed": 2.6 + float(_chapter()) * 0.5, "phase": rng.randf_range(0.0, TAU)})
@@ -535,6 +547,8 @@ func _physics_process(delta: float) -> void:
 	if dash_remaining > 0:
 		player.velocity.x = dash_direction.x * (DASH_SPEED + float(module_rank) * 2.0)
 		player.velocity.z = dash_direction.z * (DASH_SPEED + float(module_rank) * 2.0)
+	if _chapter() == 0:
+		_soft_navigation_limit()
 	player.move_and_slide()
 	ship.set_thrust(player.velocity.length() / PLAYER_SPEED, dash_remaining > 0.0, delta)
 	if player.velocity.length_squared() > 0.2:
@@ -555,6 +569,32 @@ func _physics_process(delta: float) -> void:
 	if gate_active and player.position.distance_to(gate.position) < 2.1:
 		_finish_mission()
 	_update_hud()
+
+func _soft_navigation_limit() -> void:
+	var radial := Vector3(player.position.x, 0, player.position.z)
+	var distance := radial.length()
+	var limit := SilentEdge.NAVIGATION_RADIUS
+	if distance < limit - 6.0:
+		return
+	var outward := radial / distance
+	var outward_speed := player.velocity.dot(outward)
+	if outward_speed > 0.0:
+		var braking := smoothstep(limit - 6.0, limit, distance)
+		player.velocity -= outward * outward_speed * braking
+	if distance > limit:
+		player.position = Vector3(outward.x * limit, player.position.y, outward.z * limit)
+
+func _relay_marker(target: Node3D, index: int) -> void:
+	var marker := Label3D.new()
+	marker.name = "RelayMarker"
+	marker.text = "МАЯК %02d" % (index + 1)
+	marker.position.y = 3.8
+	marker.font_size = 32
+	marker.pixel_size = 0.009
+	marker.outline_size = 10
+	marker.modulate = Color("#ffe0a7")
+	marker.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	target.add_child(marker)
 
 func _process(_delta: float) -> void:
 	if mode != Mode.PLAYING:
@@ -609,6 +649,10 @@ func _interact() -> void:
 		var target := targets[i]
 		if is_instance_valid(target) and target.position.distance_to(player.position) < 2.4:
 			target.get_node("relay").activate()
+			var marker := target.get_node_or_null("RelayMarker") as Label3D
+			if marker:
+				marker.text += " · СВЯЗЬ"
+				marker.modulate = Color("#bbffd4")
 			targets.remove_at(i)
 			objective_progress += 1
 			score += 150
