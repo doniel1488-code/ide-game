@@ -162,7 +162,7 @@ func _pump_audio() -> void:
 			tone_phase += TAU * tone_frequency / 22050.0
 			tone_remaining = maxf(0.0, tone_remaining - 1.0 / 22050.0)
 		buffer[i] = Vector2(sample, sample)
-	 sound_playback.push_buffer(buffer)
+	sound_playback.push_buffer(buffer)
 
 func _build_stars() -> void:
 	for i in range(100):
