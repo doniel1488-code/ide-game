@@ -68,9 +68,14 @@ jobs:
           $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
           if ($signature -ne 0x00004550 -or $machine -ne 0x8664) { throw 'Exported executable is not a Windows x64 PE file.' }
           $info = Get-Item 'build/LumenDrift.exe'
-          $dumpbin = Get-Command dumpbin.exe -ErrorAction SilentlyContinue
-          if (-not $dumpbin) { throw 'dumpbin is required to inspect Windows runtime dependencies.' }
-          $dependencies = & $dumpbin.Source /dependents (Resolve-Path 'build/LumenDrift.exe') 2>&1
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path $vswhere)) { throw 'vswhere is required to locate the Visual Studio dependency inspector.' }
+          $vsPath = & $vswhere -latest -products '*' -property installationPath
+          $msvcRoot = Join-Path $vsPath 'VC\Tools\MSVC'
+          $msvcVersion = Get-ChildItem -LiteralPath $msvcRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          $dumpbinPath = Join-Path $msvcVersion.FullName 'bin\Hostx64\x64\dumpbin.exe'
+          if (-not (Test-Path $dumpbinPath)) { throw 'dumpbin is required to inspect Windows runtime dependencies.' }
+          $dependencies = & $dumpbinPath /dependents (Resolve-Path 'build/LumenDrift.exe') 2>&1
           $dependencies | Out-File -FilePath 'build/dependencies.txt' -Encoding utf8
           $dllNames = @($dependencies | ForEach-Object { if ([string]$_ -match '^\s+([A-Za-z0-9_.-]+\.dll)\s*
       - name: Launch exported game on Windows
