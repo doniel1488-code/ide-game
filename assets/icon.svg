@@ -1,9 +1,33 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-  <defs><radialGradient id="g"><stop stop-color="#cafff1"/><stop offset=".42" stop-color="#8ce6d1"/><stop offset="1" stop-color="#29635f"/></radialGradient></defs>
-  <rect width="128" height="128" rx="25" fill="#071018"/>
-  <circle cx="64" cy="64" r="46" fill="none" stroke="#294b50" stroke-width="3"/>
-  <circle cx="64" cy="64" r="33" fill="none" stroke="#8ce6d1" stroke-opacity=".55" stroke-width="2"/>
-  <path d="M76 64 43 47l8 17-8 17z" fill="url(#g)"/>
-  <circle cx="64" cy="64" r="5" fill="#eafff8"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#101b35"/><stop offset="1" stop-color="#061019"/>
+    </linearGradient>
+    <radialGradient id="planet" cx="35%" cy="28%" r="78%">
+      <stop stop-color="#e4fff4"/><stop offset=".24" stop-color="#8ce6d1"/>
+      <stop offset=".68" stop-color="#3699a6"/><stop offset="1" stop-color="#17506c"/>
+    </radialGradient>
+    <linearGradient id="trail" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#55f3cf" stop-opacity="0"/><stop offset="1" stop-color="#9affea"/>
+    </linearGradient>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#bg)"/>
+  <g fill="#d9f8f4" opacity=".78">
+    <circle cx="51" cy="57" r="2.5"/><circle cx="199" cy="52" r="2"/>
+    <circle cx="211" cy="178" r="2.5"/><circle cx="57" cy="199" r="1.8"/>
+    <circle cx="93" cy="38" r="1.5"/><circle cx="180" cy="216" r="1.4"/>
+  </g>
+  <ellipse cx="128" cy="132" rx="86" ry="35" transform="rotate(-28 128 132)"
+           fill="none" stroke="#76dbc9" stroke-opacity=".75" stroke-width="5"/>
+  <circle cx="132" cy="132" r="47" fill="url(#planet)"/>
+  <path d="M91 144c21-13 56-20 82-11-5 19-20 36-41 42-19-2-34-13-41-31Z"
+        fill="#397e8c" opacity=".58"/>
+  <path d="M84 176 38 201l58-13Z" fill="url(#trail)" filter="url(#glow)"/>
+  <path d="m98 166 49-28-23 49-9-16-17-5Z" fill="#f1fff9"/>
+  <path d="m124 152 19-14-9 22Z" fill="#6bf1d1"/>
+  <circle cx="134" cy="146" r="3" fill="#173447"/>
+  <path d="M47 94a89 89 0 0 1 27-35" fill="none" stroke="#a4fff0" stroke-opacity=".72" stroke-width="3" stroke-linecap="round"/>
 </svg>
-
