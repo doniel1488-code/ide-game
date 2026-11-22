@@ -65,7 +65,12 @@ var ui_hint: Label
 var ui_button: Button
 var hud: Label
 var comms: Label
-var floor_surface: MeshInstance3D
+var world_environment: WorldEnvironment
+var space_sky_material: PanoramaSkyMaterial
+var planet_surface: MeshInstance3D
+var planet_atmosphere: MeshInstance3D
+var planet_material: StandardMaterial3D
+var current_sky_chapter := -1
 var sound_player: AudioStreamPlayer
 var sound_playback: AudioStreamGeneratorPlayback
 var tone_frequency := 0.0
@@ -115,124 +120,308 @@ func _setup_window() -> void:
 		get_window().focus_exited.connect(_on_focus_lost)
 
 func _build_world() -> void:
-	var env_node := WorldEnvironment.new()
+	world_environment = WorldEnvironment.new()
 	var env := Environment.new()
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color("#050b13")
+	env.background_mode = Environment.BG_SKY
+	var sky := Sky.new()
+	space_sky_material = PanoramaSkyMaterial.new()
+	space_sky_material.filter = true
+	sky.sky_material = space_sky_material
+	env.sky = sky
+	env.background_energy_multiplier = 0.8
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color("#6395a4")
-	env.ambient_light_energy = 0.65
-	env_node.environment = env
-	add_child(env_node)
+	env.ambient_light_color = Color("#7584a5")
+	env.ambient_light_energy = 0.38
+	env.reflected_light_source = Environment.REFLECTION_SOURCE_BG
+	world_environment.environment = env
+	add_child(world_environment)
+
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-48, -25, 0)
-	sun.light_color = Color("#9ccbc9")
-	sun.light_energy = 1.3
+	sun.rotation_degrees = Vector3(-38, -32, 0)
+	sun.light_color = Color("#c4d4ff")
+	sun.light_energy = 1.45
+	sun.shadow_enabled = true
 	add_child(sun)
-	var fill := OmniLight3D.new()
-	fill.position = Vector3(0, 10, 0)
-	fill.light_color = PALETTE[0]
-	fill.light_energy = 1.2
-	fill.omni_range = 30
-	add_child(fill)
-	floor_surface = MeshInstance3D.new()
-	var plane := PlaneMesh.new()
-	plane.size = Vector2(44, 44)
-	floor_surface.mesh = plane
-	floor_surface.material_override = _mat(Color("#0a1720"), 0.8)
-	add_child(floor_surface)
+
 	arena = Node3D.new()
 	arena.name = "Sector"
 	add_child(arena)
 	_build_stars()
+	_build_planet()
 	_build_bounds()
 	_build_player()
 	camera = Camera3D.new()
-	camera.position = Vector3(0, 17, 20)
-	camera.fov = 54
+	camera.position = Vector3(0, 21, 22)
+	camera.fov = 52
 	camera.current = true
 	add_child(camera)
 	camera.look_at(Vector3.ZERO)
 	_build_gate()
+	_update_chapter_backdrop()
 
-func _setup_audio() -> void:
-	if DisplayServer.get_name() == "headless":
-		return
-	var generator := AudioStreamGenerator.new()
-	generator.mix_rate = 22050.0
-	generator.buffer_length = 0.2
-	sound_player = AudioStreamPlayer.new()
-	sound_player.stream = generator
-	add_child(sound_player)
-	sound_player.play()
-	sound_playback = sound_player.get_stream_playback() as AudioStreamGeneratorPlayback
+func _make_space_panorama(chapter: int) -> Texture2D:
+	var width := 512
+	var height := 256
+	var image := Image.create(width, height, false, Image.FORMAT_RGB8)
+	var base := Color("#030713")
+	var nebula_tint: Color = PALETTE[chapter].lerp(Color("#8370bd"), 0.28)
+	for y in range(height):
+		var v := float(y) / float(height)
+		for x in range(width):
+			var u := float(x) / float(width)
+			var band_center := 0.50 + 0.10 * sin(u * TAU * 1.7 + sin(u * TAU * 3.0) * 0.4)
+			var broad_cloud := exp(-pow((v - band_center) / 0.16, 2.0))
+			var wisp := 0.5 + 0.5 * sin(u * TAU * 5.0 + v * 17.0 + sin(v * 21.0))
+			var dark_lane := 0.5 + 0.5 * sin(u * TAU * 2.4 - v * 11.0)
+			var cloud := clampf(broad_cloud * (0.26 + wisp * 0.48 + dark_lane * 0.16), 0.0, 0.72)
+			var pixel := base.lerp(Color("#111a31"), cloud * 0.62)
+			pixel = pixel.lerp(nebula_tint, cloud * 0.42)
+			image.set_pixel(x, y, pixel)
+	var sky_rng := RandomNumberGenerator.new()
+	sky_rng.seed = 6619 + chapter * 103
+	for i in range(1450):
+		var sx := sky_rng.randi_range(0, width - 1)
+		var sy := sky_rng.randi_range(0, height - 1)
+		var brightness := sky_rng.randf_range(0.36, 0.96)
+		var tint := Color("#dce7ff").lerp(Color("#9bc9dc"), sky_rng.randf() * 0.65)
+		image.set_pixel(sx, sy, tint * brightness)
+		if i % 55 == 0:
+			image.set_pixel((sx + 1) % width, sy, tint * brightness * 0.32)
+	return ImageTexture.create_from_image(image)
 
-func _tone(frequency: float, duration: float) -> void:
-	if sound_enabled:
-		tone_frequency = frequency
-		tone_duration = duration
-		tone_remaining = duration
+func _make_planet_texture(chapter: int) -> Texture2D:
+	var width := 512
+	var height := 256
+	var image := Image.create(width, height, false, Image.FORMAT_RGB8)
+	var noise := FastNoiseLite.new()
+	noise.seed = 93017 + chapter * 187
+	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	noise.frequency = 0.018
+	noise.fractal_octaves = 3
+	for y in range(height):
+		var v := float(y) / float(height)
+		var latitude_band := sin(v * TAU * 13.0 + sin(v * TAU * 3.0) * 0.55)
+		for x in range(width):
+			var u := float(x) / float(width)
+			var cloud := noise.get_noise_2d(float(x), float(y) * 1.25)
+			var bands := latitude_band * 0.22 + cloud * 0.62
+			var color := Color("#273d55").lerp(Color("#73859a"), clampf(0.46 + bands, 0.0, 1.0))
+			color = color.lerp(PALETTE[chapter].darkened(0.12), clampf(cloud * 0.20, 0.0, 0.20))
+			var polar := clampf(absf(v - 0.5) * 2.0, 0.0, 1.0)
+			color = color.lerp(Color("#a9c4d1"), smoothstep(0.80, 0.99, polar) * 0.72)
+			image.set_pixel(x, y, color)
+	return ImageTexture.create_from_image(image)
 
-func _pump_audio() -> void:
-	if sound_playback == null:
+func _update_chapter_backdrop() -> void:
+	var chapter := _chapter()
+	if chapter == current_sky_chapter:
 		return
-	var frames := sound_playback.get_frames_available()
-	if frames <= 0:
-		return
-	var buffer := PackedVector2Array()
-	buffer.resize(frames)
-	for i in range(frames):
-		var sample := 0.0
-		if sound_enabled and tone_remaining > 0.0:
-			var envelope := clampf(tone_remaining / tone_duration, 0.0, 1.0)
-			sample = sin(tone_phase) * envelope * 0.06
-			tone_phase += TAU * tone_frequency / 22050.0
-			tone_remaining = maxf(0.0, tone_remaining - 1.0 / 22050.0)
-		buffer[i] = Vector2(sample, sample)
-	sound_playback.push_buffer(buffer)
+	current_sky_chapter = chapter
+	space_sky_material.panorama = _make_space_panorama(chapter)
+	planet_material.albedo_texture = _make_planet_texture(chapter)
+	var accent: Color = PALETTE[chapter]
+	var atmosphere_material := planet_atmosphere.material_override as StandardMaterial3D
+	atmosphere_material.albedo_color = Color(accent.r, accent.g, accent.b, 0.16)
+	atmosphere_material.emission_color = accent.lightened(0.25)
 
 func _build_stars() -> void:
-	for i in range(100):
-		var star := MeshInstance3D.new()
-		var sphere := SphereMesh.new()
-		sphere.radius = 0.04
-		star.mesh = sphere
-		star.position = Vector3(rng.randf_range(-28, 28), rng.randf_range(4, 23), rng.randf_range(-28, 28))
-		star.material_override = _mat(Color("#80c6cf"), 0.2, 0, true)
-		add_child(star)
+	var star_mesh := SphereMesh.new()
+	star_mesh.radius = 0.045
+	star_mesh.height = 0.09
+	star_mesh.radial_segments = 6
+	star_mesh.rings = 3
+	var instances := MultiMesh.new()
+	instances.transform_format = MultiMesh.TRANSFORM_3D
+	instances.mesh = star_mesh
+	instances.instance_count = 360
+	for i in range(instances.instance_count):
+		var direction := Vector3(rng.randf_range(-1.0, 1.0), rng.randf_range(-1.0, 1.0), rng.randf_range(-1.0, 1.0))
+		if direction.length_squared() < 0.01:
+			direction = Vector3.UP
+		direction = direction.normalized()
+		var distance := rng.randf_range(62.0, 118.0)
+		var scale := rng.randf_range(0.65, 1.8)
+		instances.set_instance_transform(i, Transform3D(Basis().scaled(Vector3.ONE * scale), direction * distance))
+	var starfield := MultiMeshInstance3D.new()
+	starfield.name = "NearStarfield"
+	starfield.multimesh = instances
+	starfield.material_override = _mat(Color("#a9c9e8"), 0.2, 0, true)
+	add_child(starfield)
+
+func _build_planet() -> void:
+	var planet := Node3D.new()
+	planet.name = "Nacre — distant moon"
+	planet.position = Vector3(27, -34, -92)
+	add_child(planet)
+	planet_surface = MeshInstance3D.new()
+	var globe := SphereMesh.new()
+	globe.radius = 20.0
+	globe.height = 40.0
+	globe.radial_segments = 48
+	globe.rings = 32
+	planet_surface.mesh = globe
+	planet_surface.name = "BandedOcean"
+	planet_material = StandardMaterial3D.new()
+	planet_material.albedo_color = Color("#537189")
+	planet_material.roughness = 0.9
+	planet_material.metallic = 0.04
+	planet_material.emission_enabled = true
+	planet_material.emission = Color("#243750")
+	planet_material.emission_energy_multiplier = 0.16
+	planet_material.albedo_texture = _make_planet_texture(0)
+	planet_surface.material_override = planet_material
+	planet.add_child(planet_surface)
+	planet_atmosphere = MeshInstance3D.new()
+	var halo := SphereMesh.new()
+	halo.radius = 20.8
+	halo.height = 41.6
+	halo.radial_segments = 48
+	halo.rings = 32
+	planet_atmosphere.mesh = halo
+	planet_atmosphere.name = "BlueAtmosphere"
+	var atmosphere_material := StandardMaterial3D.new()
+	atmosphere_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	atmosphere_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	atmosphere_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	atmosphere_material.albedo_color = Color("#79bce9", 0.16)
+	atmosphere_material.emission_enabled = true
+	atmosphere_material.emission = Color("#427eb2")
+	atmosphere_material.emission_energy_multiplier = 0.34
+	planet_atmosphere.material_override = atmosphere_material
+	planet.add_child(planet_atmosphere)
 
 func _build_bounds() -> void:
 	for side in range(4):
 		var wall := StaticBody3D.new()
 		var collider := CollisionShape3D.new()
 		var shape := BoxShape3D.new()
-		shape.size = Vector3(44, 4, 0.8) if side < 2 else Vector3(0.8, 4, 44)
+		shape.size = Vector3(88, 8, 0.8) if side < 2 else Vector3(0.8, 8, 88)
 		collider.shape = shape
 		wall.add_child(collider)
-		wall.position = Vector3(0, 1, -21.5 if side == 0 else 21.5) if side < 2 else Vector3(-21.5 if side == 2 else 21.5, 1, 0)
+		wall.position = Vector3(0, 1, -44.0 if side == 0 else 44.0) if side < 2 else Vector3(-44.0 if side == 2 else 44.0, 1, 0)
+		wall.name = "Invisible navigation limit"
 		add_child(wall)
 
 func _build_player() -> void:
 	player = CharacterBody3D.new()
-	player.name = "PilotShip"
+	player.name = "Kepler Rescue Ship"
 	var collider := CollisionShape3D.new()
 	var capsule := CapsuleShape3D.new()
-	capsule.radius = 0.72
-	capsule.height = 1.4
+	capsule.radius = 0.88
+	capsule.height = 1.7
 	collider.shape = capsule
-	collider.position.y = 0.45
+	collider.position.y = 0.55
 	player.add_child(collider)
 	ship = Node3D.new()
+	ship.name = "Kepler"
 	player.add_child(ship)
-	_box(ship, Vector3(0, 0.5, -0.15), Vector3(0.72, 0.42, 2.2), Color("#b9e7df"), 0.18)
-	_box(ship, Vector3(-1.03, 0.23, 0.16), Vector3(1.38, 0.16, 1.38), Color("#587f8d"), 0.24)
-	_box(ship, Vector3(1.03, 0.23, 0.16), Vector3(1.38, 0.16, 1.38), Color("#587f8d"), 0.24)
-	_sphere(ship, Vector3(0, 0.88, -0.35), Vector3(0.3, 0.2, 0.46), Color("#67dfe0"), true)
-	_cylinder(ship, Vector3(-0.36, 0.43, 1.12), 0.22, 0.78, Color("#1b303a"))
-	_cylinder(ship, Vector3(0.36, 0.43, 1.12), 0.22, 0.78, Color("#1b303a"))
-	_sphere(ship, Vector3(-0.36, 0.43, 1.55), Vector3(0.18, 0.16, 0.18), Color("#7ef4df"), true)
-	_sphere(ship, Vector3(0.36, 0.43, 1.55), Vector3(0.18, 0.16, 0.18), Color("#7ef4df"), true)
+	_add_kepler_hull(ship)
+	var ivory := _mat(Color("#b7c7cf"), 0.38, 0.48)
+	var wing_metal := _mat(Color("#405a6d"), 0.42, 0.62)
+	var trim := _mat(Color("#d3a574"), 0.34, 0.72)
+	var glass := _mat(Color("#52c4df"), 0.16, 0.32, true)
+	_add_wing(ship, false, wing_metal, trim)
+	_add_wing(ship, true, wing_metal, trim)
+	_box(ship, Vector3(0, 0.97, 0.05), Vector3(0.10, 0.12, 1.35), Color("#dcae76"), 0.62)
+	var cockpit := _sphere(ship, Vector3(0, 0.91, -0.67), Vector3(0.56, 0.30, 0.86), Color("#69d8e5"), true)
+	cockpit.material_override = glass
+	for side in [-1.0, 1.0]:
+		var engine := _cylinder(ship, Vector3(side * 1.18, 0.46, 1.05), 0.31, 1.02, Color("#1d2e3b"))
+		engine.rotation_degrees.x = 90
+		var nozzle := _cylinder(ship, Vector3(side * 1.18, 0.46, 1.55), 0.24, 0.22, Color("#71828b"))
+		nozzle.rotation_degrees.x = 90
+		_sphere(ship, Vector3(side * 1.18, 0.46, 1.72), Vector3(0.18, 0.14, 0.10), Color("#7ce7ee"), true)
+		_box(ship, Vector3(side * 1.16, 0.28, 0.20), Vector3(0.12, 0.12, 1.2), Color("#e2b77e"), 0.55)
+		_box(ship, Vector3(side * 0.72, 0.38, 0.95), Vector3(0.64, 0.16, 0.44), Color("#8096a1"), 0.52)
+		_sphere(ship, Vector3(side * 0.38, 0.39, 0.75), Vector3(0.08, 0.08, 0.08), Color("#ffbd76"), true)
+	ship.scale = Vector3.ONE * 1.12
 	add_child(player)
+
+func _add_kepler_hull(parent: Node3D) -> void:
+	var profiles: Array[Vector3] = [
+		Vector3(0.10, 0.10, -2.35),
+		Vector3(0.38, 0.22, -1.55),
+		Vector3(0.54, 0.31, -0.35),
+		Vector3(0.46, 0.28, 0.78),
+		Vector3(0.30, 0.20, 1.38)
+	]
+	var sides := 8
+	var rings: Array = []
+	for profile in profiles:
+		var ring: Array[Vector3] = []
+		for side in range(sides):
+			var angle := TAU * float(side) / float(sides) + PI / 8.0
+			ring.append(Vector3(sin(angle) * profile.x, 0.58 + cos(angle) * profile.y, profile.z))
+		rings.append(ring)
+	var tool := SurfaceTool.new()
+	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	tool.set_smooth_group(-1)
+	var nose := Vector3(0, 0.58, -2.66)
+	var tail := Vector3(0, 0.58, 1.58)
+	for side in range(sides):
+		var next := (side + 1) % sides
+		tool.add_vertex(nose)
+		tool.add_vertex(rings[0][next])
+		tool.add_vertex(rings[0][side])
+		tool.add_vertex(tail)
+		tool.add_vertex(rings[profiles.size() - 1][side])
+		tool.add_vertex(rings[profiles.size() - 1][next])
+	for section in range(profiles.size() - 1):
+		for side in range(sides):
+			var next := (side + 1) % sides
+			var a: Vector3 = rings[section][side]
+			var b: Vector3 = rings[section][next]
+			var d: Vector3 = rings[section + 1][side]
+			var e: Vector3 = rings[section + 1][next]
+			tool.add_vertex(a)
+			tool.add_vertex(b)
+			tool.add_vertex(e)
+			tool.add_vertex(a)
+			tool.add_vertex(e)
+			tool.add_vertex(d)
+	tool.generate_normals()
+	var hull := MeshInstance3D.new()
+	hull.name = "Faceted rescue fuselage"
+	hull.mesh = tool.commit()
+	var hull_material := _mat(Color("#9caeb9"), 0.34, 0.58)
+	hull_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	hull.material_override = hull_material
+	parent.add_child(hull)
+
+func _add_wing(parent: Node3D, mirrored: bool, material: StandardMaterial3D, trim: StandardMaterial3D) -> void:
+	var sign := -1.0 if mirrored else 1.0
+	var root_front := Vector3(sign * 0.42, 0.50, -0.62)
+	var tip_front := Vector3(sign * 2.48, 0.26, 0.42)
+	var tip_back := Vector3(sign * 2.05, 0.25, 1.42)
+	var root_back := Vector3(sign * 0.44, 0.49, 1.18)
+	var points := [root_front, tip_front, tip_back, root_back]
+	var triangles: Array[Vector3] = [
+		points[0], points[1], points[2], points[0], points[2], points[3],
+		points[0] + Vector3(0, -0.14, 0), points[2] + Vector3(0, -0.14, 0), points[1] + Vector3(0, -0.14, 0),
+		points[0] + Vector3(0, -0.14, 0), points[3] + Vector3(0, -0.14, 0), points[2] + Vector3(0, -0.14, 0)
+	]
+	var wing_mesh := _mesh_from_triangles(triangles)
+	var wing := MeshInstance3D.new()
+	wing.name = "Port rescue wing" if mirrored else "Starboard rescue wing"
+	wing.mesh = wing_mesh
+	wing.material_override = material
+	parent.add_child(wing)
+	var strip_start := Vector3(sign * 0.72, 0.35, 0.87)
+	var strip_end := Vector3(sign * 1.98, 0.29, 1.18)
+	var strip := _box(parent, (strip_start + strip_end) * 0.5, Vector3(0.08, 0.045, strip_start.distance_to(strip_end)), Color("#d3a574"), 0.72)
+	strip.rotation.y = atan2(strip_end.x - strip_start.x, strip_end.z - strip_start.z)
+	for index in range(2):
+		var pad_x := sign * (0.92 + float(index) * 0.38)
+		_box(parent, Vector3(pad_x, 0.43, 0.27), Vector3(0.16, 0.10, 0.36), Color("#263946"), 0.5)
+
+func _mesh_from_triangles(vertices: Array[Vector3]) -> ArrayMesh:
+	var tool := SurfaceTool.new()
+	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	tool.set_smooth_group(-1)
+	for vertex in vertices:
+		tool.add_vertex(vertex)
+	tool.generate_normals()
+	return tool.commit()
 
 func _build_gate() -> void:
 	gate = Node3D.new()
@@ -402,6 +591,7 @@ func _start_mission() -> void:
 	lives = 3
 	objective_progress = 0
 	mission_clock = 0
+	rng.seed = 218900 + mission_index * 7919
 	defense_time = 0
 	dash_cooldown = 0
 	dash_remaining = 0
@@ -412,7 +602,7 @@ func _start_mission() -> void:
 	objective_kind = mission_index % 3
 	objective_goal = 6 if objective_kind == Objective.RECOVER else (90 if objective_kind == Objective.DEFEND else 3 + _chapter())
 	_clear_arena()
-	floor_surface.material_override = _mat(Color("#0a1720").lerp(PALETTE[_chapter()].darkened(0.8), 0.28), 0.8)
+	_update_chapter_backdrop()
 	_spawn_landmarks()
 	_spawn_obstacles(8 + _chapter() * 2)
 	_spawn_objectives()
@@ -429,64 +619,184 @@ func _clear_arena() -> void:
 
 func _spawn_landmarks() -> void:
 	var accent: Color = PALETTE[_chapter()]
+	if _chapter() == 0:
+		_build_relay_silhouette(arena, Vector3(-12, 0, -15), accent, true)
+		_build_derelict_wreck(arena, Vector3(12, 1.5, -17))
+		return
 	for i in range(4):
 		var x := -13.0 + float(i) * 8.5
 		match _chapter():
-			0:
-				_box(arena, Vector3(x, 2.4, -17), Vector3(0.45, 4.8, 0.45), Color("#2e5960"))
-				_sphere(arena, Vector3(x, 5.0, -17), Vector3(0.8, 0.8, 0.8), accent, true)
 			1:
-				var ring := MeshInstance3D.new()
-				var torus := TorusMesh.new()
-				torus.inner_radius = 2.0
-				torus.outer_radius = 2.2
-				ring.mesh = torus
-				ring.position = Vector3(x, 1.0, -16.5)
-				ring.rotation_degrees.x = 90
-				ring.material_override = _mat(accent, 0.3, 0.1, true)
-				arena.add_child(ring)
+				_build_derelict_wreck(arena, Vector3(x, 1.0, -17))
 			2:
-				_cylinder(arena, Vector3(x, 0.9, -17), 0.7, 1.8, Color("#45636b"))
-				_sphere(arena, Vector3(x, 1.0, -17), Vector3(1.2, 0.8, 0.8), accent, true)
+				_build_relay_silhouette(arena, Vector3(x, 0, -17), accent, false)
 			3:
-				_box(arena, Vector3(x, 1.5, -17), Vector3(0.5, 3.0, 0.5), Color("#674e68"))
-				_box(arena, Vector3(x + 1.5, 2.8, -17), Vector3(3.0, 0.22, 0.22), accent)
+				_build_relay_silhouette(arena, Vector3(x, 0, -17), accent, true)
 			4:
-				_cylinder(arena, Vector3(x, 2.0, -17), 1.2, 4.0, Color("#786b49"))
-				_sphere(arena, Vector3(x, 4.2, -17), Vector3(1.1, 0.8, 1.1), accent, true)
+				_build_relay_silhouette(arena, Vector3(x, 0, -17), accent, true)
+
+func _build_relay_silhouette(parent: Node3D, position: Vector3, accent: Color, flagship: bool) -> void:
+	var relay := Node3D.new()
+	relay.name = "Outer relay mast"
+	relay.position = position
+	parent.add_child(relay)
+	_add_cylinder_y(relay, Vector3(0, 0.25, 0), 1.2 if flagship else 0.85, 0.5, Color("#344858"))
+	_add_cylinder_y(relay, Vector3(0, 1.35, 0), 0.16, 2.2, Color("#758795"))
+	_add_cylinder_y(relay, Vector3(0, 2.55, 0), 0.28, 0.22, Color("#b7c5c9"))
+	var ring := MeshInstance3D.new()
+	var ring_mesh := TorusMesh.new()
+	ring_mesh.inner_radius = 0.74 if flagship else 0.55
+	ring_mesh.outer_radius = 0.88 if flagship else 0.68
+	ring.mesh = ring_mesh
+	ring.position = Vector3(0, 2.15, 0)
+	ring.rotation_degrees.x = 90
+	ring.material_override = _mat(accent.lightened(0.15), 0.3, 0.4, true)
+	relay.add_child(ring)
+	for side in [-1.0, 1.0]:
+		var panel := _box(relay, Vector3(side * 1.24, 1.05, 0), Vector3(0.92, 0.10, 0.68), Color("#293e55"), 0.62)
+		panel.rotation.z = -side * 0.08
+		for cell in range(3):
+			_box(relay, Vector3(side * (0.98 + float(cell) * 0.25), 1.12, 0), Vector3(0.045, 0.025, 0.58), Color("#78aabd"), 0.35)
+	_sphere(relay, Vector3(0, 2.76, 0), Vector3(0.20, 0.26, 0.20), accent, true)
+	_add_cylinder_y(relay, Vector3(0, 3.15, 0), 0.045, 0.62, Color("#becbd0"))
+	var cap := _sphere(relay, Vector3(0, 3.48, 0), Vector3(0.12, 0.12, 0.12), Color("#eff2dc"), true)
+	cap.material_override = _mat(Color("#e5dfba"), 0.22, 0.2, true)
+
+func _build_derelict_wreck(parent: Node3D, position: Vector3) -> void:
+	var wreck := Node3D.new()
+	wreck.name = "Stranded convoy fragment"
+	wreck.position = position
+	wreck.rotation.y = -0.48
+	wreck.rotation.z = -0.16
+	parent.add_child(wreck)
+	_box(wreck, Vector3(0, 0.15, 0), Vector3(5.6, 0.58, 1.25), Color("#273948"), 0.62)
+	_box(wreck, Vector3(0, 0.49, -0.45), Vector3(1.35, 0.18, 1.55), Color("#516778"), 0.58)
+	for side in [-1.0, 1.0]:
+		_box(wreck, Vector3(side * 1.4, 0.28, 0.22), Vector3(1.72, 0.10, 1.28), Color("#354a59"), 0.66)
+		_box(wreck, Vector3(side * 2.2, 0.36, 0.10), Vector3(0.28, 0.08, 0.72), Color("#b57652"), 0.45)
+		var engine_glow := _sphere(wreck, Vector3(side * 0.48, 0.19, 0.82), Vector3(0.16, 0.16, 0.12), Color("#f39a63"), true)
+		engine_glow.material_override = _mat(Color("#d97451"), 0.3, 0.15, true)
+
+func _add_cylinder_y(parent: Node3D, pos: Vector3, radius: float, height: float, color: Color) -> MeshInstance3D:
+	var instance := MeshInstance3D.new()
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = radius
+	mesh.bottom_radius = radius * 0.82
+	mesh.height = height
+	mesh.radial_segments = 8
+	instance.mesh = mesh
+	instance.position = pos
+	instance.material_override = _mat(color, 0.45, 0.55)
+	parent.add_child(instance)
+	return instance
 
 func _spawn_obstacles(count: int) -> void:
+	var chapter_one_layout: Array[Vector3] = [
+		Vector3(-11, 1.1, -7), Vector3(-6, 2.2, 11), Vector3(9, 1.0, -8),
+		Vector3(12, 2.5, 7), Vector3(-16, 1.3, 6), Vector3(3, 1.0, 15),
+		Vector3(-4, 2.8, -12), Vector3(7, 1.6, 13), Vector3(16, 1.2, -10)
+	]
 	for i in range(count):
+		var radius := rng.randf_range(0.9, 1.7)
 		var rock := StaticBody3D.new()
+		rock.name = "Faceted basalt fragment"
 		var mesh_node := MeshInstance3D.new()
-		var mesh := SphereMesh.new()
-		mesh.radius = rng.randf_range(0.7, 1.7)
-		mesh.height = mesh.radius * 1.7
-		mesh_node.mesh = mesh
-		mesh_node.material_override = _mat(Color("#263c47"), 0.92, 0.04)
+		mesh_node.mesh = _make_asteroid_mesh(218900 + _chapter() * 100 + i)
+		var rock_material := _mat(Color("#46535e").lerp(Color("#7b6d62"), rng.randf_range(0.05, 0.42)), 0.94, 0.12)
+		rock_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+		mesh_node.material_override = rock_material
+		mesh_node.scale = Vector3(radius * rng.randf_range(0.82, 1.2), radius * rng.randf_range(0.76, 1.18), radius * rng.randf_range(0.82, 1.25))
 		rock.add_child(mesh_node)
 		var collision := CollisionShape3D.new()
 		var sphere := SphereShape3D.new()
-		sphere.radius = mesh.radius * 0.75
+		sphere.radius = radius * 0.82
 		collision.shape = sphere
 		rock.add_child(collision)
-		rock.position = Vector3(rng.randf_range(-17, 17), mesh.radius * 0.7, rng.randf_range(-16, 16))
-		if rock.position.length() < 5 or rock.position.distance_to(Vector3(15.5, 0, 0)) < 4:
-			rock.position.x += 8
-		rock.scale = Vector3(rng.randf_range(0.8, 1.3), rng.randf_range(0.75, 1.2), rng.randf_range(0.8, 1.35))
+		if _chapter() == 0 and i < chapter_one_layout.size():
+			rock.position = chapter_one_layout[i]
+		else:
+			rock.position = Vector3(rng.randf_range(-17, 17), rng.randf_range(0.7, 2.8), rng.randf_range(-16, 16))
+			if rock.position.length() < 5 or rock.position.distance_to(Vector3(15.5, 0, 0)) < 4:
+				rock.position.x += 8
+		rock.rotation = Vector3(rng.randf_range(-0.6, 0.6), rng.randf_range(0, TAU), rng.randf_range(-0.5, 0.5))
 		arena.add_child(rock)
+
+func _make_asteroid_mesh(seed_value: int) -> ArrayMesh:
+	var mesh_rng := RandomNumberGenerator.new()
+	mesh_rng.seed = seed_value
+	var segment_count := 9
+	var ring_angles: Array[float] = [0.55, 1.42, 2.28]
+	var rings: Array = []
+	for ring_index in range(ring_angles.size()):
+		var ring: Array[Vector3] = []
+		for segment in range(segment_count):
+			var angle := TAU * float(segment) / float(segment_count) + float(ring_index % 2) * 0.12
+			var radius := mesh_rng.randf_range(0.78, 1.18)
+			var latitude: float = ring_angles[ring_index]
+			ring.append(Vector3(sin(latitude) * cos(angle) * radius, cos(latitude) * radius, sin(latitude) * sin(angle) * radius))
+		rings.append(ring)
+	var top := Vector3(0, mesh_rng.randf_range(0.82, 1.14), 0)
+	var bottom := Vector3(0, -mesh_rng.randf_range(0.82, 1.14), 0)
+	var tool := SurfaceTool.new()
+	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	tool.set_smooth_group(-1)
+	for segment in range(segment_count):
+		var next := (segment + 1) % segment_count
+		tool.add_vertex(top)
+		tool.add_vertex(rings[0][segment])
+		tool.add_vertex(rings[0][next])
+		for ring_index in range(rings.size() - 1):
+			var upper_a: Vector3 = rings[ring_index][segment]
+			var upper_b: Vector3 = rings[ring_index][next]
+			var lower_a: Vector3 = rings[ring_index + 1][segment]
+			var lower_b: Vector3 = rings[ring_index + 1][next]
+			tool.add_vertex(upper_a)
+			tool.add_vertex(lower_b)
+			tool.add_vertex(upper_b)
+			tool.add_vertex(upper_a)
+			tool.add_vertex(lower_a)
+			tool.add_vertex(lower_b)
+		tool.add_vertex(bottom)
+		tool.add_vertex(rings[rings.size() - 1][next])
+		tool.add_vertex(rings[rings.size() - 1][segment])
+	tool.generate_normals()
+	return tool.commit()
 
 func _spawn_objectives() -> void:
 	if objective_kind == Objective.RECOVER:
 		for i in range(objective_goal):
 			var core := _area("MemoryCore", Vector3(rng.randf_range(-15, 14), 0.8, rng.randf_range(-14, 14)), 0.85)
-			var gem := MeshInstance3D.new()
-			var mesh := SphereMesh.new()
-			mesh.radius = 0.48
-			mesh.height = 1.05
-			gem.mesh = mesh
-			gem.material_override = _mat(PALETTE[_chapter()], 0.15, 0, true)
-			core.add_child(gem)
+			var crystal := Node3D.new()
+			crystal.name = "Six-sided memory shard"
+			crystal.rotation_degrees = Vector3(12, float(i) * 37.0, 18)
+			core.add_child(crystal)
+			var upper := CylinderMesh.new()
+			upper.top_radius = 0.0
+			upper.bottom_radius = 0.43
+			upper.height = 0.72
+			upper.radial_segments = 6
+			var shard_a := MeshInstance3D.new()
+			shard_a.mesh = upper
+			shard_a.position.y = 0.30
+			shard_a.material_override = _mat(PALETTE[_chapter()].lightened(0.22), 0.16, 0.1, true)
+			crystal.add_child(shard_a)
+			var lower := CylinderMesh.new()
+			lower.top_radius = 0.43
+			lower.bottom_radius = 0.0
+			lower.height = 0.72
+			lower.radial_segments = 6
+			var shard_b := MeshInstance3D.new()
+			shard_b.mesh = lower
+			shard_b.position.y = -0.30
+			shard_b.material_override = _mat(Color("#bdeaf1"), 0.12, 0.1, true)
+			crystal.add_child(shard_b)
+			var band := MeshInstance3D.new()
+			var band_mesh := TorusMesh.new()
+			band_mesh.inner_radius = 0.28
+			band_mesh.outer_radius = 0.34
+			band.mesh = band_mesh
+			band.material_override = _mat(Color("#e8fcff"), 0.13, 0.1, true)
+			crystal.add_child(band)
 			cores.append(core)
 	else:
 		for i in range(objective_goal):
@@ -494,35 +804,51 @@ func _spawn_objectives() -> void:
 			if pos.length() < 5:
 				pos.x += 9
 			var target := _area("RelayNode", pos, 1.15)
-			_box(target, Vector3(0, 1, 0), Vector3(0.7, 1.9, 0.7), Color("#52727b"))
-			_sphere(target, Vector3(0, 2.15, 0), Vector3(0.36, 0.42, 0.36), PALETTE[_chapter()], true)
+			_build_relay_silhouette(target, Vector3.ZERO, PALETTE[_chapter()], false)
 			targets.append(target)
 
 func _spawn_enemies(count: int) -> void:
 	for i in range(count):
 		var enemy := Area3D.new()
 		enemy.name = "Hunter" if i % 2 == 0 else "Wisp"
-		enemy.position = Vector3(rng.randf_range(-15, 15), 0.5, rng.randf_range(-15, 15))
+		enemy.position = Vector3(rng.randf_range(-15, 15), rng.randf_range(0.4, 1.2), rng.randf_range(-15, 15))
 		if enemy.position.length() < 7:
 			enemy.position.x += 11
 		var collider := CollisionShape3D.new()
 		var sphere := SphereShape3D.new()
-		sphere.radius = 0.95
+		sphere.radius = 0.98
 		collider.shape = sphere
 		enemy.add_child(collider)
-		_sphere(enemy, Vector3.ZERO, Vector3(0.8, 0.72, 0.8), Color("#c36f9f") if i % 2 else Color("#de826a"), true)
-		_box(enemy, Vector3(0, 0, -0.95), Vector3(0.18, 0.12, 1.3), Color("#6b4264"))
-		if enemy.name == "Wisp":
-			var halo := MeshInstance3D.new()
-			var halo_mesh := TorusMesh.new()
-			halo_mesh.inner_radius = 0.72
-			halo_mesh.outer_radius = 0.79
-			halo.mesh = halo_mesh
-			halo.rotation_degrees.x = 90
-			halo.material_override = _mat(Color("#d29aff"), 0.2, 0, true)
-			enemy.add_child(halo)
+		_build_drone_model(enemy, enemy.name == "Wisp", i)
 		arena.add_child(enemy)
 		enemies.append({"node": enemy, "speed": 2.6 + float(_chapter()) * 0.5, "phase": rng.randf_range(0.0, TAU)})
+
+func _build_drone_model(enemy: Area3D, wisp: bool, variant: int) -> void:
+	var hull_color := Color("#704c55") if wisp else Color("#68747c")
+	var sensor_color := Color("#ce9fff") if wisp else Color("#ffb36c")
+	var core := _sphere(enemy, Vector3(0, 0.08, 0), Vector3(0.68, 0.52, 0.72), hull_color, false)
+	core.material_override = _mat(hull_color, 0.54, 0.72)
+	var eye := _sphere(enemy, Vector3(0, 0.14, -0.47), Vector3(0.28, 0.22, 0.20), sensor_color, true)
+	eye.material_override = _mat(sensor_color, 0.18, 0.08, true)
+	var ring := MeshInstance3D.new()
+	var ring_mesh := TorusMesh.new()
+	ring_mesh.inner_radius = 0.58 if wisp else 0.42
+	ring_mesh.outer_radius = 0.72 if wisp else 0.54
+	ring.mesh = ring_mesh
+	ring.rotation_degrees.x = 90
+	ring.rotation_degrees.z = float(variant) * 14.0
+	ring.material_override = _mat(Color("#c295d6") if wisp else Color("#8696a0"), 0.28, 0.68)
+	enemy.add_child(ring)
+	for side in [-1.0, 1.0]:
+		var arm := _box(enemy, Vector3(side * 0.70, -0.04, 0.20), Vector3(0.78, 0.16, 0.22), Color("#384853"), 0.72)
+		arm.rotation.y = side * -0.24
+		_box(enemy, Vector3(side * 1.04, -0.07, -0.02), Vector3(0.14, 0.48, 0.18), Color("#8a6b67"), 0.52)
+		var claw := _cylinder(enemy, Vector3(side * 1.10, -0.24, -0.12), 0.08, 0.40, Color("#d3a983"))
+		claw.rotation_degrees.x = 62
+	if wisp:
+		for spoke in range(3):
+			var angle := TAU * float(spoke) / 3.0
+			_box(enemy, Vector3(cos(angle) * 0.86, 0.16, sin(angle) * 0.86), Vector3(0.48, 0.10, 0.12), Color("#624d78"), 0.45).rotation.y = -angle
 
 func _area(label: String, pos: Vector3, radius: float) -> Area3D:
 	var area := Area3D.new()
@@ -553,8 +879,8 @@ func _physics_process(delta: float) -> void:
 	player.move_and_slide()
 	if player.velocity.length_squared() > 0.2:
 		ship.rotation.y = lerp_angle(ship.rotation.y, atan2(-player.velocity.x, -player.velocity.z), 8.0 * delta)
-	camera.position = camera.position.lerp(player.position + Vector3(0, 17, 20), 4.0 * delta)
-	camera.look_at(player.position + Vector3(0, 0, -1), Vector3.UP)
+	camera.position = camera.position.lerp(player.position + Vector3(0, 21, 22), 4.0 * delta)
+	camera.look_at(player.position + Vector3(player.velocity.x * 0.18, 0, -2.6 + player.velocity.z * 0.12), Vector3.UP)
 	_update_enemies(delta)
 	_update_objectives()
 	if objective_kind == Objective.DEFEND:
@@ -594,6 +920,7 @@ func _update_enemies(delta: float) -> void:
 				var phase := mission_clock * 1.6 + float(record["phase"])
 				steer = (steer + Vector3(cos(phase), 0, sin(phase)) * 0.5).normalized()
 			enemy.position += steer * float(record["speed"]) * delta
+			enemy.rotation.y = atan2(-steer.x, -steer.z)
 		if enemy.position.distance_to(player.position) < 1.35:
 			_take_hit()
 
