@@ -31,8 +31,9 @@ jobs:
           $templateBinary = Join-Path $tempRoot 'windows_release_x86_64.exe'
           $engineExtract = Join-Path $tempRoot 'engine'
           New-Item -ItemType Directory -Force -Path $tempRoot, $engineExtract | Out-Null
-          curl.exe --fail --location --retry 4 --output $engineZip "https://downloads.godotengine.org/?flavor=stable&platform=windows.64&slug=win64.exe.zip&version=$version"
+          curl.exe --fail --location --retry 8 --retry-all-errors --retry-delay 5 --connect-timeout 30 --max-time 900 --output $engineZip "https://downloads.godotengine.org/?flavor=stable&platform=windows.64&slug=win64.exe.zip&version=$version"
           if ($LASTEXITCODE -ne 0) { throw 'Could not download the official Godot Windows editor.' }
+          if ((Get-Item -LiteralPath $engineZip).Length -lt 30000000) { throw 'Downloaded Godot editor archive is unexpectedly small.' }
           Expand-Archive -LiteralPath $engineZip -DestinationPath $engineExtract -Force
           $engine = Get-ChildItem -Path $engineExtract -Filter 'Godot_v4.7.2-stable_win64.exe' -Recurse | Select-Object -First 1
           if (-not $engine) { throw 'Godot executable was missing from the official archive.' }
