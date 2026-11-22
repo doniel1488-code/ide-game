@@ -62,7 +62,9 @@ var ui_text: Label
 var ui_hint: Label
 var ui_button: Button
 var hud: Label
+var comms: Label
 var gate: Node3D
+var archive_choice := true
 
 func _ready() -> void:
 	rng.randomize()
@@ -194,6 +196,12 @@ func _build_ui() -> void:
 	hud.add_theme_font_size_override("font_size", 15)
 	hud.add_theme_color_override("font_color", Color("#d7eeeb"))
 	root.add_child(hud)
+	comms = Label.new()
+	comms.position = Vector2(28, 750)
+	comms.custom_minimum_size = Vector2(1200, 28)
+	comms.add_theme_font_size_override("font_size", 15)
+	comms.add_theme_color_override("font_color", Color("#8de6d7"))
+	root.add_child(comms)
 	ui_panel = PanelContainer.new()
 	ui_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	ui_panel.position = Vector2(-280, -220)
@@ -246,6 +254,9 @@ func _show(next_mode: int) -> void:
 	mode = next_mode
 	ui_panel.visible = mode != Mode.PLAYING
 	hud.visible = mode == Mode.PLAYING
+	comms.visible = mode == Mode.PLAYING
+	if mode == Mode.PLAYING:
+		comms.text = "ЛИРА: «Держу маршрут. Следи за сигналом цели»"
 	match mode:
 		Mode.MENU:
 			ui_title.text = "✳  LUMEN DRIFT"
@@ -255,7 +266,7 @@ func _show(next_mode: int) -> void:
 		Mode.BRIEFING:
 			ui_title.text = "%s · МИССИЯ %02d" % [CHAPTERS[_chapter()], mission_index + 1]
 			ui_text.text = "%s\n\n%s\n\nЗадача: %s" % [TITLES[mission_index], BRIEFS[mission_index], _objective_text()]
-			ui_hint.text = "После вылета ищи цель по свечению. Прогресс главы сохранится."
+			ui_hint.text = "1 — сохранить голос архива · 2 — удалить эхо" if mission_index == 13 else "После вылета ищи цель по свечению. Прогресс главы сохранится."
 			ui_button.text = "ВЫЛЕТЕТЬ"
 		Mode.PAUSED:
 			ui_title.text = "ПАУЗА"
@@ -269,7 +280,8 @@ func _show(next_mode: int) -> void:
 			ui_button.text = "СЛЕДУЮЩАЯ МИССИЯ"
 		Mode.WON:
 			ui_title.text = "СИГНАЛ ДОМА"
-			ui_text.text = "Пять глав пройдены. В капсулах просыпаются спасённые.\n\nЛира: «Это не архив. Кто-то услышал нас и ответил».\n\nЛУЧШИЙ РЕЗУЛЬТАТ: %d" % best_score
+			var epilogue := "Лира сохранила голос архива. В нём слышен новый ответ." if archive_choice else "Лира стёрла эхо, чтобы оно больше не звало погибших. В эфире звучит живой ответ."
+			ui_text.text = "Пять глав пройдены. В капсулах просыпаются спасённые.\n\n%s\n\nЛУЧШИЙ РЕЗУЛЬТАТ: %d" % [epilogue, best_score]
 			ui_hint.text = "КАМПАНИЯ ЗАВЕРШЕНА"
 			ui_button.text = "НОВАЯ КАМПАНИЯ"
 		Mode.LOST:
@@ -470,6 +482,7 @@ func _update_objectives() -> void:
 			cores.remove_at(i)
 			objective_progress += 1
 			score += 100
+		comms.text = "ЛИРА: «Фрагмент памяти %d из %d. В записи слышно дыхание экипажа»" % [objective_progress, objective_goal]
 	if objective_kind == Objective.RECOVER and objective_progress >= objective_goal:
 		_activate_gate()
 	if objective_kind == Objective.REPAIR and objective_progress >= objective_goal:
@@ -485,6 +498,7 @@ func _interact() -> void:
 			targets.remove_at(i)
 			objective_progress += 1
 			score += 150
+			comms.text = "ЛИРА: «Узел отвечает. Я записала последние слова дежурного»"
 			break
 	if objective_progress >= objective_goal:
 		_activate_gate()
@@ -499,6 +513,7 @@ func _take_hit() -> void:
 		return
 	lives -= 1
 	invulnerability = 1.4
+	comms.text = "ЛИРА: «Удар по корпусу. Я удержу управление, пока щит перезаряжается»"
 	if player.position.length_squared() > 0.01:
 		player.velocity = player.position.normalized() * 7.0
 	if lives <= 0:
@@ -550,6 +565,12 @@ func _unhandled_input(event: InputEvent) -> void:
 				_show(Mode.PLAYING)
 			elif key.keycode == KEY_M:
 				_toggle_sound()
+			elif key.keycode == KEY_ENTER or key.keycode == KEY_KP_ENTER or key.keycode == KEY_SPACE:
+				if mode != Mode.PLAYING:
+					_primary()
+			elif mode == Mode.BRIEFING and mission_index == 13 and (key.keycode == KEY_1 or key.keycode == KEY_KP_1 or key.keycode == KEY_2 or key.keycode == KEY_KP_2):
+				archive_choice = key.keycode == KEY_1 or key.keycode == KEY_KP_1
+				ui_hint.text = "Выбор: %s" % ("голос архива сохранён" if archive_choice else "эхо будет удалено")
 
 func _down(key: int) -> bool:
 	return bool(pressed.get(key, false))
