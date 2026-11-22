@@ -12,7 +12,8 @@ $stdoutPath = Join-Path $logDirectory "$Name.stdout.log"
 $stderrPath = Join-Path $logDirectory "$Name.stderr.log"
 
 Write-Host "Running Godot diagnostic '$Name': $($GodotArguments -join ' ')"
-$process = Start-Process -FilePath $env:GODOT_EXE -ArgumentList $GodotArguments -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+$quotedArguments = ($GodotArguments | ForEach-Object { '"' + $_.Replace('"', '\"') + '"' }) -join ' '
+$process = Start-Process -FilePath $env:GODOT_EXE -ArgumentList $quotedArguments -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
 Write-Host "Godot diagnostic '$Name' exit code: $($process.ExitCode)"
 Write-Host "----- stdout: $Name -----"
 if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath | ForEach-Object { Write-Host $_ } }
