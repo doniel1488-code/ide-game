@@ -1,4 +1,3 @@
-class_name LumenGame
 extends Node2D
 
 const WORLD := Vector2(960.0, 600.0)
