@@ -604,6 +604,8 @@ func _interact() -> void:
 		_activate_gate()
 
 func _activate_gate() -> void:
+	if gate_active:
+		return
 	gate_active = true
 	var mesh := gate.get_child(0) as MeshInstance3D
 	mesh.material_override = _mat(Color("#84f3d9"), 0.15, 0, true)
