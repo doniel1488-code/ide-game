@@ -38,7 +38,7 @@ var best_score := 0
 var module_rank := 0
 var objective_progress := 0
 var objective_goal := 3
-var objective_kind := Objective.REPAIR
+var objective_kind: int = Objective.REPAIR
 var mission_clock := 0.0
 var defense_time := 0.0
 var dash_remaining := 0.0
@@ -402,7 +402,7 @@ func _start_mission() -> void:
 	gate_active = false
 	player.position = Vector3.ZERO
 	player.velocity = Vector3.ZERO
-	objective_kind = Objective(mission_index % 3)
+	objective_kind = mission_index % 3
 	objective_goal = 6 if objective_kind == Objective.RECOVER else (90 if objective_kind == Objective.DEFEND else 3 + _chapter())
 	_clear_arena()
 	floor_surface.material_override = _mat(Color("#0a1720").lerp(PALETTE[_chapter()].darkened(0.8), 0.28), 0.8)
@@ -652,7 +652,7 @@ func _finish_mission() -> void:
 	_show(Mode.INTERMISSION)
 
 func _objective_text() -> String:
-	match Objective(mission_index % 3):
+	match objective_kind:
 		Objective.REPAIR:
 			return "найди и активируй %d узла (F рядом с узлом), затем долети до портала" % (3 + _chapter())
 		Objective.RECOVER:
