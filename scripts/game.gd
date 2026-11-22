@@ -69,11 +69,7 @@ var hud: Label
 var comms: Label
 var orbit: Node3D
 var sound_player: AudioStreamPlayer
-var sound_playback: AudioStreamGeneratorPlayback
-var tone_frequency := 0.0
-var tone_duration := 0.0
-var tone_remaining := 0.0
-var tone_phase := 0.0
+var tones: Dictionary = {}
 var gate: Node3D
 var gate_ring: MeshInstance3D
 var archive_choice := true
@@ -107,7 +103,6 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	if is_instance_valid(sound_player):
 		sound_player.stop()
-	sound_playback = null
 
 func _capture_preview() -> void:
 	if preview_mode == "gameplay" and sound_enabled:
@@ -157,38 +152,31 @@ func _setup_window() -> void:
 func _setup_audio() -> void:
 	if DisplayServer.get_name() == "headless":
 		return
-	var generator := AudioStreamGenerator.new()
-	generator.mix_rate = 22050.0
-	generator.buffer_length = 0.2
 	sound_player = AudioStreamPlayer.new()
-	sound_player.stream = generator
 	add_child(sound_player)
-	sound_player.play()
-	sound_playback = sound_player.get_stream_playback() as AudioStreamGeneratorPlayback
 
 func _tone(frequency: float, duration: float) -> void:
-	if sound_enabled:
-		tone_frequency = frequency
-		tone_duration = duration
-		tone_remaining = duration
-
-func _pump_audio() -> void:
-	if sound_playback == null:
+	if not sound_enabled or not is_instance_valid(sound_player):
 		return
-	var frames := sound_playback.get_frames_available()
-	if frames <= 0:
-		return
-	var buffer := PackedVector2Array()
-	buffer.resize(frames)
-	for i in range(frames):
-		var sample := 0.0
-		if sound_enabled and tone_remaining > 0.0:
-			var envelope := clampf(tone_remaining / tone_duration, 0.0, 1.0)
-			sample = sin(tone_phase) * envelope * 0.06
-			tone_phase += TAU * tone_frequency / 22050.0
-			tone_remaining = maxf(0.0, tone_remaining - 1.0 / 22050.0)
-		buffer[i] = Vector2(sample, sample)
-	sound_playback.push_buffer(buffer)
+	var key := Vector2(frequency, duration)
+	var stream := tones.get(key) as AudioStreamWAV
+	if stream == null:
+		const SAMPLE_RATE := 22050
+		var frames := roundi(duration * SAMPLE_RATE)
+		var samples := PackedByteArray()
+		samples.resize(frames * 2)
+		for i in range(frames):
+			var time := float(i) / SAMPLE_RATE
+			var envelope := minf(time / 0.008, 1.0) * (1.0 - time / duration)
+			var sample := roundi(sin(TAU * frequency * time) * envelope * 5500.0)
+			samples.encode_s16(i * 2, sample)
+		stream = AudioStreamWAV.new()
+		stream.format = AudioStreamWAV.FORMAT_16_BITS
+		stream.mix_rate = SAMPLE_RATE
+		stream.data = samples
+		tones[key] = stream
+	sound_player.stream = stream
+	sound_player.play()
 
 func _build_world() -> void:
 	orbit = preload("res://scenes/environment/orbit.tscn").instantiate()
@@ -569,7 +557,6 @@ func _physics_process(delta: float) -> void:
 	_update_hud()
 
 func _process(_delta: float) -> void:
-	_pump_audio()
 	if mode != Mode.PLAYING:
 		return
 	if _once(KEY_SPACE) and dash_cooldown <= 0:
