@@ -63,6 +63,13 @@ var ui_hint: Label
 var ui_button: Button
 var hud: Label
 var comms: Label
+var floor_surface: MeshInstance3D
+var sound_player: AudioStreamPlayer
+var sound_playback: AudioStreamGeneratorPlayback
+var tone_frequency := 0.0
+var tone_duration := 0.0
+var tone_remaining := 0.0
+var tone_phase := 0.0
 var gate: Node3D
 var archive_choice := true
 
@@ -71,6 +78,7 @@ func _ready() -> void:
 	_setup_window()
 	_load_save()
 	_build_world()
+	_setup_audio()
 	_build_ui()
 	_show(Mode.MENU)
 
@@ -102,12 +110,12 @@ func _build_world() -> void:
 	fill.light_energy = 1.2
 	fill.omni_range = 30
 	add_child(fill)
-	var floor := MeshInstance3D.new()
+	floor_surface = MeshInstance3D.new()
 	var plane := PlaneMesh.new()
 	plane.size = Vector2(44, 44)
-	floor.mesh = plane
-	floor.material_override = _mat(Color("#0a1720"), 0.8)
-	add_child(floor)
+	floor_surface.mesh = plane
+	floor_surface.material_override = _mat(Color("#0a1720"), 0.8)
+	add_child(floor_surface)
 	arena = Node3D.new()
 	arena.name = "Sector"
 	add_child(arena)
@@ -121,6 +129,40 @@ func _build_world() -> void:
 	add_child(camera)
 	camera.look_at(Vector3.ZERO)
 	_build_gate()
+
+func _setup_audio() -> void:
+	var generator := AudioStreamGenerator.new()
+	generator.mix_rate = 22050.0
+	generator.buffer_length = 0.2
+	sound_player = AudioStreamPlayer.new()
+	sound_player.stream = generator
+	add_child(sound_player)
+	sound_player.play()
+	sound_playback = sound_player.get_stream_playback() as AudioStreamGeneratorPlayback
+
+func _tone(frequency: float, duration: float) -> void:
+	if sound_enabled:
+		tone_frequency = frequency
+		tone_duration = duration
+		tone_remaining = duration
+
+func _pump_audio() -> void:
+	if sound_playback == null:
+		return
+	var frames := sound_playback.get_frames_available()
+	if frames <= 0:
+		return
+	var buffer := PackedVector2Array()
+	buffer.resize(frames)
+	for i in range(frames):
+		var sample := 0.0
+		if sound_enabled and tone_remaining > 0.0:
+			var envelope := clampf(tone_remaining / tone_duration, 0.0, 1.0)
+			sample = sin(tone_phase) * envelope * 0.06
+			tone_phase += TAU * tone_frequency / 22050.0
+			tone_remaining = maxf(0.0, tone_remaining - 1.0 / 22050.0)
+		buffer[i] = Vector2(sample, sample)
+	 sound_playback.push_buffer(buffer)
 
 func _build_stars() -> void:
 	for i in range(100):
@@ -334,6 +376,8 @@ func _start_mission() -> void:
 	objective_kind = Objective(mission_index % 3)
 	objective_goal = 6 if objective_kind == Objective.RECOVER else (90 if objective_kind == Objective.DEFEND else 3 + _chapter())
 	_clear_arena()
+	floor_surface.material_override = _mat(Color("#0a1720").lerp(PALETTE[_chapter()].darkened(0.8), 0.28), 0.8)
+	_spawn_landmarks()
 	_spawn_obstacles(8 + _chapter() * 2)
 	_spawn_objectives()
 	_spawn_enemies(2 + _chapter())
@@ -346,6 +390,34 @@ func _clear_arena() -> void:
 	targets.clear()
 	cores.clear()
 	_build_gate()
+
+func _spawn_landmarks() -> void:
+	var accent: Color = PALETTE[_chapter()]
+	for i in range(4):
+		var x := -13.0 + float(i) * 8.5
+		match _chapter():
+			0:
+				_box(arena, Vector3(x, 2.4, -17), Vector3(0.45, 4.8, 0.45), Color("#2e5960"))
+				_sphere(arena, Vector3(x, 5.0, -17), Vector3(0.8, 0.8, 0.8), accent, true)
+			1:
+				var ring := MeshInstance3D.new()
+				var torus := TorusMesh.new()
+				torus.inner_radius = 2.0
+				torus.outer_radius = 2.2
+				ring.mesh = torus
+				ring.position = Vector3(x, 1.0, -16.5)
+				ring.rotation_degrees.x = 90
+				ring.material_override = _mat(accent, 0.3, 0.1, true)
+				arena.add_child(ring)
+			2:
+				_cylinder(arena, Vector3(x, 0.9, -17), 0.7, 1.8, Color("#45636b"))
+				_sphere(arena, Vector3(x, 1.0, -17), Vector3(1.2, 0.8, 0.8), accent, true)
+			3:
+				_box(arena, Vector3(x, 1.5, -17), Vector3(0.5, 3.0, 0.5), Color("#674e68"))
+				_box(arena, Vector3(x + 1.5, 2.8, -17), Vector3(3.0, 0.22, 0.22), accent)
+			4:
+				_cylinder(arena, Vector3(x, 2.0, -17), 1.2, 4.0, Color("#786b49"))
+				_sphere(arena, Vector3(x, 4.2, -17), Vector3(1.1, 0.8, 1.1), accent, true)
 
 func _spawn_obstacles(count: int) -> void:
 	for i in range(count):
@@ -404,8 +476,17 @@ func _spawn_enemies(count: int) -> void:
 		enemy.add_child(collider)
 		_sphere(enemy, Vector3.ZERO, Vector3(0.8, 0.72, 0.8), Color("#c36f9f") if i % 2 else Color("#de826a"), true)
 		_box(enemy, Vector3(0, 0, -0.95), Vector3(0.18, 0.12, 1.3), Color("#6b4264"))
+		if enemy.name == "Wisp":
+			var halo := MeshInstance3D.new()
+			var halo_mesh := TorusMesh.new()
+			halo_mesh.inner_radius = 0.72
+			halo_mesh.outer_radius = 0.79
+			halo.mesh = halo_mesh
+			halo.rotation_degrees.x = 90
+			halo.material_override = _mat(Color("#d29aff"), 0.2, 0, true)
+			enemy.add_child(halo)
 		arena.add_child(enemy)
-		enemies.append({"node": enemy, "speed": 2.6 + float(_chapter()) * 0.5})
+		enemies.append({"node": enemy, "speed": 2.6 + float(_chapter()) * 0.5, "phase": rng.randf_range(0.0, TAU)})
 
 func _area(label: String, pos: Vector3, radius: float) -> Area3D:
 	var area := Area3D.new()
@@ -450,6 +531,7 @@ func _physics_process(delta: float) -> void:
 	_update_hud()
 
 func _process(_delta: float) -> void:
+	_pump_audio()
 	if mode != Mode.PLAYING:
 		return
 	if _once(KEY_SPACE) and dash_cooldown <= 0:
@@ -457,6 +539,7 @@ func _process(_delta: float) -> void:
 		dash_direction = move.normalized() if move.length_squared() > 0.01 else Vector3(-sin(ship.rotation.y), 0, -cos(ship.rotation.y))
 		dash_remaining = DASH_DURATION
 		dash_cooldown = DASH_COOLDOWN
+		_tone(590.0, 0.1)
 		invulnerability = maxf(invulnerability, 0.3)
 	if _once(KEY_F):
 		_interact()
@@ -470,7 +553,11 @@ func _update_enemies(delta: float) -> void:
 			continue
 		var toward := player.position - enemy.position
 		if toward.length_squared() > 0.01:
-			enemy.position += toward.normalized() * float(record["speed"]) * delta
+			var steer := toward.normalized()
+			if enemy.name == "Wisp":
+				var phase := mission_clock * 1.6 + float(record["phase"])
+				steer = (steer + Vector3(cos(phase), 0, sin(phase)) * 0.5).normalized()
+			enemy.position += steer * float(record["speed"]) * delta
 		if enemy.position.distance_to(player.position) < 1.35:
 			_take_hit()
 
@@ -482,6 +569,7 @@ func _update_objectives() -> void:
 			cores.remove_at(i)
 			objective_progress += 1
 			score += 100
+			_tone(470.0 + objective_progress * 35.0, 0.1)
 		comms.text = "ЛИРА: «Фрагмент памяти %d из %d. В записи слышно дыхание экипажа»" % [objective_progress, objective_goal]
 	if objective_kind == Objective.RECOVER and objective_progress >= objective_goal:
 		_activate_gate()
@@ -498,6 +586,7 @@ func _interact() -> void:
 			targets.remove_at(i)
 			objective_progress += 1
 			score += 150
+			_tone(660.0, 0.14)
 			comms.text = "ЛИРА: «Узел отвечает. Я записала последние слова дежурного»"
 			break
 	if objective_progress >= objective_goal:
@@ -513,6 +602,7 @@ func _take_hit() -> void:
 		return
 	lives -= 1
 	invulnerability = 1.4
+	_tone(140.0, 0.2)
 	comms.text = "ЛИРА: «Удар по корпусу. Я удержу управление, пока щит перезаряжается»"
 	if player.position.length_squared() > 0.01:
 		player.velocity = player.position.normalized() * 7.0
@@ -585,6 +675,8 @@ func _toggle_sound() -> void:
 	sound_enabled = not sound_enabled
 	if ui_hint:
 		ui_hint.text = "ЗВУК: %s" % ("ВКЛ" if sound_enabled else "ВЫКЛ")
+	if sound_enabled:
+		_tone(660.0, 0.1)
 
 func _save(checkpoint: int) -> void:
 	var cfg := ConfigFile.new()
