@@ -854,7 +854,7 @@ func _update_hud() -> void:
 		hud.text = hud.text.replace("КОРПУС %d/3" % lives, "КОРПУС %d/%d" % [lives, expedition.hull()]) + "\n" + expedition.hud_line()
 
 func _on_focus_lost() -> void:
-	if mode == Mode.PLAYING:
+	if preview_path.is_empty() and mode == Mode.PLAYING:
 		pressed.clear()
 		_show(Mode.PAUSED)
 
