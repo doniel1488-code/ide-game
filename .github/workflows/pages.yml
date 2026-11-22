@@ -1,0 +1,38 @@
+name: Publish Lumen Drift website
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  site-preview:
+    if: vars.DEPLOY_PAGES != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain Pages is not enabled
+        run: echo "The website source remains in the private repository. Set repository variable DEPLOY_PAGES=true and enable GitHub Pages to publish it."
+
+  deploy:
+    if: vars.DEPLOY_PAGES == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: website
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
