@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#071018">
+  <meta name="description" content="Lumen Drift — аркадное путешествие сквозь заброшенный звёздный маяк.">
+  <title>Lumen Drift — Сигнал сквозь тьму</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="#home" aria-label="Lumen Drift — домой"><span class="brand-mark">✳</span><span>LUMEN <b>DRIFT</b></span></a>
+      <div class="top-meta"><span class="live-dot"></span> СИГНАЛ СТАБИЛЕН <span class="top-divider">/</span> СЕКТОР 07</div>
+      <button class="sound-button" id="soundButton" aria-label="Звук включён">♫ <span>ЗВУК</span></button>
+    </header>
+
+    <section class="game-layout" aria-label="Игра Lumen Drift">
+      <aside class="side-card left-card">
+        <div class="eyebrow">ЗАДАНИЕ <span>01 / 05</span></div>
+        <h2>Зажги<br>маяк.</h2>
+        <p>Собери световые ядра и проведи искру через пять затерянных секторов.</p>
+        <div class="mission-line"></div>
+        <div class="stat-row"><span>ЯДРА</span><strong id="sideCores">00 <i>/ 12</i></strong></div>
+        <div class="stat-row"><span>ЦЕЛЬ</span><strong id="sideGoal">СОБРАТЬ</strong></div>
+        <div class="mini-tip"><span class="tip-icon">✧</span><span>Рывок даёт короткую неуязвимость. Береги его для тесных мест.</span></div>
+      </aside>
+
+      <div class="stage-wrap">
+        <div class="stage-frame">
+          <canvas id="game" width="960" height="600" aria-label="Игровое поле"></canvas>
+          <div class="stage-hud" id="hud" hidden>
+            <div class="hud-left"><span class="hud-label">СЕКТОР <b id="sectorNumber">01</b></span><span class="hud-sep">·</span><span class="hud-label">СЧЁТ <b id="score">0000</b></span></div>
+            <div class="hud-right"><span class="lives" id="lives">♥ ♥ ♥</span><button class="pause-button" id="pauseButton" aria-label="Пауза">Ⅱ</button></div>
+          </div>
+          <div class="overlay" id="overlay">
+            <div class="overlay-content" id="overlayContent"></div>
+          </div>
+          <div class="toast" id="toast" aria-live="polite"></div>
+        </div>
+        <div class="stage-caption"><span><i class="caption-star">✦</i> ПОТЕРЯННЫЙ МАЯК <b>·</b> ПОСЛЕДНИЙ СИГНАЛ 2189</span><span id="stageStatus">ОЖИДАНИЕ ПИЛОТА</span></div>
+      </div>
+
+      <aside class="side-card right-card">
+        <div class="eyebrow">КАК ИГРАТЬ</div>
+        <div class="controls-list">
+          <div class="control-row"><span>ДВИЖЕНИЕ</span><div class="key-cluster"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></div></div>
+          <div class="control-row"><span>ИЛИ</span><div class="key-cluster"><kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd></div></div>
+          <div class="control-row"><span>РЫВОК</span><kbd class="wide-key">ПРОБЕЛ</kbd></div>
+          <div class="control-row"><span>ПАУЗА</span><kbd class="wide-key">ESC</kbd></div>
+        </div>
+        <div class="mission-line"></div>
+        <div class="sector-label">СЕКТОРЫ</div>
+        <div class="sector-track" id="sectorTrack"><span class="sector-node active">01</span><i></i><span class="sector-node">02</span><i></i><span class="sector-node">03</span><i></i><span class="sector-node">04</span><i></i><span class="sector-node">05</span></div>
+        <div class="signal-note"><span class="signal-icon">⌁</span><span>Каждый сектор становится опаснее. Двигайся, чтобы выжить.</span></div>
+      </aside>
+    </section>
+    <footer class="footer"><span>© 2189 LUMEN RESEARCH DIVISION</span><span>ОДИН ПИЛОТ. ОДИН ПОСЛЕДНИЙ СИГНАЛ.</span><span>V. 1.0.0</span></footer>
+  </main>
+  <script src="game.js"></script>
+</body>
+</html>
+
