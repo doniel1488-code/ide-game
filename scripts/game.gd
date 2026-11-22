@@ -95,6 +95,11 @@ func _ready() -> void:
 			_start_mission()
 		call_deferred("_capture_preview")
 
+func _exit_tree() -> void:
+	if is_instance_valid(sound_player):
+		sound_player.stop()
+	sound_playback = null
+
 func _capture_preview() -> void:
 	await get_tree().create_timer(2.0).timeout
 	var image := get_viewport().get_texture().get_image()
