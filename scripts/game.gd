@@ -264,7 +264,7 @@ func _update_particles(delta: float) -> void:
 			particles.remove_at(index)
 
 
-func take_hit() -> void:
+func _take_hit() -> void:
 	if player_invulnerable > 0.0 or mode != Mode.PLAYING:
 		return
 	lives -= 1
