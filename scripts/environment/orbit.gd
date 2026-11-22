@@ -46,10 +46,10 @@ func _make_space_panorama(chapter: int, accent: Color) -> Texture2D:
 		var v := float(y) / float(height)
 		for x in range(width):
 			var u := float(x) / float(width)
-			var band_center := 0.50 + 0.10 * sin(u * TAU * 1.7 + sin(u * TAU * 3.0) * 0.4)
+			var band_center := 0.50 + 0.10 * sin(u * TAU * 2.0 + sin(u * TAU * 3.0) * 0.4)
 			var broad_cloud := exp(-pow((v - band_center) / 0.16, 2.0))
 			var wisp := 0.5 + 0.5 * sin(u * TAU * 5.0 + v * 17.0 + sin(v * 21.0))
-			var dark_lane := 0.5 + 0.5 * sin(u * TAU * 2.4 - v * 11.0)
+			var dark_lane := 0.5 + 0.5 * sin(u * TAU * 3.0 - v * 11.0)
 			var cloud := clampf(broad_cloud * (0.26 + wisp * 0.48 + dark_lane * 0.16), 0.0, 0.72)
 			var pixel := base.lerp(Color("#111a31"), cloud * 0.62)
 			pixel = pixel.lerp(nebula_tint, cloud * 0.42)
@@ -59,7 +59,7 @@ func _make_space_panorama(chapter: int, accent: Color) -> Texture2D:
 	for i in range(1450):
 		var sx := sky_rng.randi_range(0, width - 1)
 		var sy := sky_rng.randi_range(0, height - 1)
-		var brightness := sky_rng.randf_range(0.36, 0.96)
+		var brightness := sky_rng.randf_range(0.15, 0.75)
 		var tint := Color("#dce7ff").lerp(Color("#9bc9dc"), sky_rng.randf() * 0.65)
 		image.set_pixel(sx, sy, tint * brightness)
 		if i % 55 == 0:
@@ -79,7 +79,9 @@ func _make_planet_texture(chapter: int, accent: Color) -> Texture2D:
 		var v := float(y) / float(height)
 		var latitude_band := sin(v * TAU * 13.0 + sin(v * TAU * 3.0) * 0.55)
 		for x in range(width):
-			var cloud := noise.get_noise_2d(float(x), float(y) * 1.25)
+			var theta := float(x) * TAU / float(width)
+			var latitude := v * PI
+			var cloud := noise.get_noise_3d(cos(theta) * sin(latitude) * 160.0, cos(latitude) * 160.0, sin(theta) * sin(latitude) * 160.0)
 			var bands := latitude_band * 0.22 + cloud * 0.62
 			var color := Color("#273d55").lerp(Color("#73859a"), clampf(0.46 + bands, 0.0, 1.0))
 			color = color.lerp(accent.darkened(0.12), clampf(cloud * 0.20, 0.0, 0.20))

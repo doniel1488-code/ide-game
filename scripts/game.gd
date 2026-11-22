@@ -110,6 +110,12 @@ func _exit_tree() -> void:
 	sound_playback = null
 
 func _capture_preview() -> void:
+	if preview_mode == "gameplay" and sound_enabled:
+		var peak := -200.0
+		for sample_index in range(25):
+			await get_tree().create_timer(0.025).timeout
+			peak = maxf(peak, AudioServer.get_bus_peak_volume_left_db(0, 0))
+		print("Capture audio peak (dBFS): ", peak)
 	await get_tree().create_timer(2.0).timeout
 	await RenderingServer.frame_post_draw
 	var image := get_viewport().get_texture().get_image()
@@ -122,6 +128,7 @@ func _capture_preview() -> void:
 func _configure_preview() -> void:
 	get_window().size = Vector2i(1280, 800)
 	set_physics_process(false)
+	_update_hud()
 	if preview_mode == "ship":
 		camera.position = Vector3(4.8, 3.4, 6.0)
 		camera.look_at(Vector3(0, 0.5, 0))
