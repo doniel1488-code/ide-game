@@ -70,6 +70,38 @@ func _run() -> void:
 	if not _expect(game.mode == GameMode.PLAYING, "pause overlay resumes the game"):
 		return
 
+	var repair_position: Vector3 = game.targets[0].position
+	game.player.position = repair_position
+	var interact := InputEventKey.new()
+	interact.keycode = KEY_F
+	interact.physical_keycode = KEY_F
+	interact.pressed = true
+	game._unhandled_input(interact)
+	game._process(0.016)
+	interact.pressed = false
+	game._unhandled_input(interact)
+	if not _expect(game.objective_progress == 1, "F activates a nearby 3D relay"):
+		return
+
+	game.mission_index = 1
+	game._start_mission()
+	game.enemies.clear()
+	game.player.position = game.cores[0].position
+	game._update_objectives()
+	if not _expect(game.objective_progress == 1 and game.cores.size() == 5, "touching a memory crystal collects it"):
+		return
+
+	game.mission_index = 2
+	game._start_mission()
+	game.enemies.clear()
+	game.defense_time = 89.9
+	game._physics_process(0.2)
+	if not _expect(game.gate_active, "surviving a defense objective opens the exit"):
+		return
+
+	game.mission_index = 0
+	game._start_mission()
+	game.enemies.clear()
 	for mission in range(15):
 		if mission > 0:
 			game.mission_index = mission
