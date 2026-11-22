@@ -111,7 +111,7 @@ func _input(event: InputEvent) -> void:
 					dash_requested = true
 				get_viewport().set_input_as_handled()
 				return
-		if key_event.keycode == KEY_M or key_event.physical_keycode == KEY_M:
+			if key_event.keycode == KEY_M or key_event.physical_keycode == KEY_M:
 				sound_enabled = not sound_enabled
 				if sound_enabled:
 					_play_tone(660.0, 0.09)
