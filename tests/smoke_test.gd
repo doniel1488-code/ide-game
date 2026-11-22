@@ -82,6 +82,12 @@ func _run() -> void:
 	game._unhandled_input(interact)
 	if not _expect(game.objective_progress == 1, "F activates a nearby 3D relay"):
 		return
+	for relay in game.targets.duplicate():
+		if is_instance_valid(relay):
+			game.player.position = relay.position
+			game._interact()
+	if not _expect(game.objective_progress == game.objective_goal and game.gate_active, "activating every relay through F opens the exit"):
+		return
 
 	game.mission_index = 1
 	game._start_mission()
@@ -89,6 +95,12 @@ func _run() -> void:
 	game.player.position = game.cores[0].position
 	game._update_objectives()
 	if not _expect(game.objective_progress == 1 and game.cores.size() == 5, "touching a memory crystal collects it"):
+		return
+	for core in game.cores.duplicate():
+		if is_instance_valid(core):
+			game.player.position = core.position
+			game._update_objectives()
+	if not _expect(game.objective_progress == game.objective_goal and game.gate_active, "collecting every memory crystal opens the exit"):
 		return
 
 	game.mission_index = 2
@@ -137,4 +149,6 @@ func _run() -> void:
 		return
 
 	print("All Lumen Drift 3D campaign smoke checks passed.")
+	game.queue_free()
+	await process_frame
 	quit(0)
