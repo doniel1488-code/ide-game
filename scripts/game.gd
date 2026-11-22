@@ -74,6 +74,7 @@ var tone_remaining := 0.0
 var tone_phase := 0.0
 var gate: Node3D
 var archive_choice := true
+var preview_path := ""
 
 func _ready() -> void:
 	rng.randomize()
@@ -83,6 +84,19 @@ func _ready() -> void:
 	_setup_audio()
 	_build_ui()
 	_show(Mode.MENU)
+	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--capture-preview="):
+			preview_path = argument.trim_prefix("--capture-preview=")
+	if not preview_path.is_empty():
+		_start_mission()
+		call_deferred("_capture_preview")
+
+func _capture_preview() -> void:
+	await get_tree().create_timer(2.0).timeout
+	var image := get_viewport().get_texture().get_image()
+	var result := image.save_png(preview_path)
+	if result != OK:
+		push_error("Could not save gameplay preview image to %s" % preview_path)
 
 func _setup_window() -> void:
 	if DisplayServer.get_name() != "headless":
