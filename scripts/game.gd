@@ -709,7 +709,7 @@ func _toggle_sound() -> void:
 	if sound_enabled:
 		_tone(660.0, 0.1)
 
-	func _save(checkpoint: int) -> void:
+func _save(checkpoint: int) -> void:
 	campaign_completed = checkpoint >= MISSION_COUNT
 	var cfg := ConfigFile.new()
 	cfg.set_value("campaign", "complete", campaign_completed)
