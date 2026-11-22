@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import binascii
 import os
+import time
 import re
 import struct
 import tempfile
@@ -20,21 +21,27 @@ def request_range(url: str, start: int | None, end: int | None, suffix: int | No
     else:
         header = f"bytes={start}-{end}"
     request = urllib.request.Request(url, headers={"Range": header, "User-Agent": "LumenDrift-build/1.0"})
-    response = urllib.request.urlopen(request, timeout=180)
-    if response.status != 206:
-        response.close()
-        raise RuntimeError(f"Godot download host did not honor byte ranges (HTTP {response.status}).")
-    match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", response.headers.get("Content-Range", ""))
-    if not match:
-        response.close()
-        raise RuntimeError("Godot download host returned an invalid Content-Range header.")
-    actual_start, actual_end, total = map(int, match.groups())
-    data = response.read()
-    final_url = response.geturl()
-    response.close()
-    if len(data) != actual_end - actual_start + 1:
-        raise RuntimeError("Godot download host returned an incomplete byte range.")
-    return data, final_url, actual_start, total
+    last_error = None
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(request, timeout=180) as response:
+                if response.status != 206:
+                    raise RuntimeError(f"Godot download host did not honor byte ranges (HTTP {response.status}).")
+                match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", response.headers.get("Content-Range", ""))
+                if not match:
+                    raise RuntimeError("Godot download host returned an invalid Content-Range header.")
+                actual_start, actual_end, total = map(int, match.groups())
+                data = response.read()
+                final_url = response.geturl()
+                if len(data) != actual_end - actual_start + 1:
+                    raise RuntimeError("Godot download host returned an incomplete byte range.")
+                return data, final_url, actual_start, total
+        except (OSError, TimeoutError, urllib.error.URLError) as error:
+            last_error = error
+            if attempt == 4:
+                break
+            time.sleep(2 ** attempt)
+    raise RuntimeError(f"Could not download byte range after 5 attempts: {last_error}")
 
 
 def find_entry(directory: bytes, wanted: bytes):
