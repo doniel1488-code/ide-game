@@ -49,8 +49,8 @@ jobs:
       - name: Import project and run gameplay tests
         shell: pwsh
         run: |
-          & $env:GODOT_EXE --headless --path . --editor --quit
-          if ($LASTEXITCODE -ne 0) { throw 'Godot could not import the desktop project.' }
+          & $env:GODOT_EXE --headless --path . --quit-after 3
+          if ($LASTEXITCODE -ne 0) { throw 'Godot could not start the desktop project.' }
           & $env:GODOT_EXE --headless --path . --script res://tests/smoke_test.gd
           if ($LASTEXITCODE -ne 0) { throw 'Gameplay smoke test failed.' }
 
