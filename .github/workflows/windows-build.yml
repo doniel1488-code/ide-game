@@ -97,6 +97,21 @@ jobs:
           $zipInfo = Get-Item 'dist/LumenDrift-Windows-x64.zip'
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Portable archive contains ``LumenDrift.exe`` and ``README.txt`` ($([math]::Round($zipInfo.Length / 1MB, 2)) MiB)."
 
+      - name: Launch game extracted from portable ZIP
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $extract = Join-Path $env:RUNNER_TEMP 'LumenDrift-from-zip'
+          [System.IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path 'dist/LumenDrift-Windows-x64.zip'), $extract, $true)
+          $game = Start-Process -FilePath (Join-Path $extract 'LumenDrift.exe') -WorkingDirectory $extract -PassThru
+          Start-Sleep -Seconds 8
+          $game.Refresh()
+          if ($game.HasExited) { throw "Extracted game exited during startup (code $($game.ExitCode))." }
+          $window = Get-Process -Id $game.Id
+          if ($window.MainWindowHandle -eq 0) { throw 'The extracted game process has no visible main window.' }
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Portable ZIP extracted and its game window stayed open for 8 seconds (PID $($game.Id))."
+          Stop-Process -Id $game.Id -Force
+
       - name: Upload portable ZIP artifact
         uses: actions/upload-artifact@v4
         with:
