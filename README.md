@@ -4,7 +4,7 @@
 
 ## Статус
 
-Игра и сайт находятся в разработке. GitHub Actions run #48 на commit `fa0b4f8310b0c1c9dd9d1cde8aa50759f06c51e7` прошёл Windows x64 export, запуск на runner, проверку portable ZIP и запуск распакованной игры при блокировке исходящей сети. Это проверка CI-runner, не чистого пользовательского ПК. Публичного Release пока нет; временный Actions artifact хранится до 22 декабря 2026 года.
+Игра и сайт находятся в разработке. GitHub Actions run #56 на commit `878a500793a2750b9f41378f1b427d35981ed700` прошёл Windows x64 export, запуск на runner, проверку portable ZIP, получение скриншотов и запуск распакованной игры при блокировке исходящей сети. В headless smoke-test проверены реальные действия для всех трёх реализованных типов целей; AudioStreamGeneratorPlayback leak больше не появляется. Это проверка CI-runner, не чистого пользовательского ПК. [Временный Actions artifact](https://github.com/doniel1488-code/ide-game/actions/runs/45063145420/artifacts/14770820254) размером 39,346,779 байт хранится до 22 декабря 2026 года. Публичного Release пока нет.
 
 - [Windows workflow и его артефакты](https://github.com/doniel1488-code/ide-game/actions/workflows/windows-build.yml)
 - [Релизы](https://github.com/doniel1488-code/ide-game/releases)
