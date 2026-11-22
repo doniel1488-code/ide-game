@@ -1,7 +1,7 @@
 extends SceneTree
 
 const GAME_SCENE: PackedScene = preload("res://scenes/main.tscn")
-enum GameMode { MENU, BRIEFING, PLAYING, PAUSED, INTERMISSION, WON, LOST }
+enum GameMode { MENU, BRIEFING, PLAYING, PAUSED, INTERMISSION, WON, LOST, JOURNAL, UPGRADES }
 
 func _initialize() -> void:
 	call_deferred("_run")
@@ -13,6 +13,21 @@ func _expect(condition: bool, label: String) -> bool:
 		return false
 	print("PASS: " + label)
 	return true
+
+func _press(game, code: int) -> void:
+	var key := InputEventKey.new()
+	key.keycode = code
+	key.physical_keycode = code
+	key.pressed = true
+	game._unhandled_input(key)
+	game._process(0.016)
+	key.pressed = false
+	game._unhandled_input(key)
+
+func _exit_sector(game) -> void:
+	game.player.position = game.gate.position
+	game.player.velocity = Vector3.ZERO
+	game._physics_process(0.016)
 
 func _run() -> void:
 	var game: Variant = GAME_SCENE.instantiate()
@@ -70,75 +85,132 @@ func _run() -> void:
 	if not _expect(game.mode == GameMode.PLAYING, "pause overlay resumes the game"):
 		return
 
-	var repair_position: Vector3 = game.targets[0].position
-	game.player.position = repair_position
-	var interact := InputEventKey.new()
-	interact.keycode = KEY_F
-	interact.physical_keycode = KEY_F
-	interact.pressed = true
-	game._unhandled_input(interact)
-	game._process(0.016)
-	interact.pressed = false
-	game._unhandled_input(interact)
-	if not _expect(game.objective_progress == 1, "F activates a nearby 3D relay"):
-		return
-	for relay in game.targets.duplicate():
-		if is_instance_valid(relay):
-			game.player.position = relay.position
-			game._interact()
-	if not _expect(game.objective_progress == game.objective_goal and game.gate_active, "activating every relay through F opens the exit"):
-		return
-
 	game.dash_remaining = 0.0
 	game.pressed.clear()
-	game.player.position = game.gate.position
 	game.player.velocity = Vector3.ZERO
-	game._physics_process(0.016)
-	if not _expect(game.mode == GameMode.INTERMISSION, "completed objective permits exit from mission 1"):
+	var first_relay: Area3D = game.targets[0]
+	game.player.position = first_relay.position
+	_press(game, KEY_F)
+	if not _expect(game.objective_progress == 0 and not first_relay.get_meta("scanned", false), "an unscanned relay cannot be activated"):
 		return
-	game._primary()
-	if not _expect(game.mission_index == 1 and game.mode == GameMode.BRIEFING, "exit advances chapter-one briefing"):
+	_press(game, KEY_Q)
+	if not _expect(first_relay.get_meta("scanned", false) and first_relay.get_node("RelayMarker").visible, "Q detects a nearby relay"):
 		return
-	game._primary()
-	game.enemies.clear()
-	game.player.position = game.cores[0].position
-	game._update_objectives()
-	if not _expect(game.objective_progress == 1 and game.cores.size() == 5, "touching a memory crystal collects it"):
+	for item: Area3D in game.expedition.cargo.duplicate():
+		game.player.position = item.position
+		game._physics_process(0.016)
+	if not _expect(game.expedition.alloy == 5 and game.expedition.cells == 4, "contact collects alloy and energy cells"):
 		return
-	for core in game.cores.duplicate():
-		if is_instance_valid(core):
-			game.player.position = core.position
-			game._update_objectives()
-	if not _expect(game.objective_progress == game.objective_goal and game.gate_active, "collecting every memory crystal opens the exit"):
+	_press(game, KEY_R)
+	if not _expect(game.lives == 3 and game.expedition.alloy == 4, "repair uses one alloy and restores hull"):
 		return
+	game.player.position = Vector3.ZERO
+	_press(game, KEY_U)
+	_press(game, KEY_1)
+	if not _expect(game.mode == GameMode.UPGRADES and game.lives == 4 and game.expedition.alloy == 1, "workshop buys and applies hull module"):
+		return
+	_press(game, KEY_U)
 
-	game.player.position = game.gate.position
-	game.player.velocity = Vector3.ZERO
-	game._physics_process(0.016)
-	if not _expect(game.mode == GameMode.INTERMISSION, "completed objective permits exit from mission 2"):
-		return
-	game._primary()
-	if not _expect(game.mission_index == 2 and game.mode == GameMode.BRIEFING, "exit advances chapter-one briefing"):
-		return
-	game._primary()
-	game.enemies.clear()
-	for frame in range(451):
+	for target: Area3D in game.targets.duplicate():
+		game.player.position = target.position
+		_press(game, KEY_Q)
+		_press(game, KEY_F)
+		if not _expect(target.get_meta("power", 0) == 1 and is_instance_valid(game.expedition.relay) == false, "energy powers relay before tuning"):
+			return
+		_press(game, KEY_F)
+		var relay_origin := target.position
+		game.player.position = Vector3.ZERO
 		game._physics_process(0.2)
-	if not _expect(game.gate_active, "surviving a defense objective opens the exit"):
+		if not _expect(is_equal_approx(game.expedition.uplink_time, 2.0), "relay pauses when the player leaves transmission radius"):
+			return
+		game.player.position = relay_origin
+		for i in range(12):
+			game._physics_process(0.2)
+	if not _expect(game.gate_active and game.expedition.cells == 1, "three completed transmissions consume three cells and open the route"):
 		return
-
-	game.player.position = game.gate.position
-	game._physics_process(0.016)
-	if not _expect(game.mode == GameMode.INTERMISSION, "defense exit completes Silent Edge"):
+	_exit_sector(game)
+	if not _expect(game.mode == GameMode.INTERMISSION and game.expedition.alloy == 3, "first sector exit awards alloy and saves checkpoint"):
 		return
+	game._primary()
+	game._primary()
 
-	game.mission_index = 0
-	game._start_mission()
 	game.enemies.clear()
-	for mission in range(15):
-		if mission > 0:
-			game.mission_index = mission
-			game._start_mission()
+	for core: Area3D in game.cores.duplicate():
+		game.player.position = core.position
+		game._physics_process(0.016)
+	if not _expect(game.gate_active and game.expedition.archive.size() == 6, "recovering all crew crystals opens the exit and stores six entries"):
+		return
+	_press(game, KEY_J)
+	if not _expect(game.mode == GameMode.JOURNAL and game.ui_text.text.contains("ЗАПИСЬ 1/6"), "J opens the recovered journal"):
+		return
+	_press(game, KEY_RIGHT)
+	if not _expect(game.ui_text.text.contains("ЗАПИСЬ 2/6"), "journal can turn to another recovered entry"):
+		return
+	_press(game, KEY_J)
+	_exit_sector(game)
+	if not _expect(game.mode == GameMode.INTERMISSION, "memory mission exits into intermission"):
+		return
+
+	game.free()
+	game = GAME_SCENE.instantiate()
+	root.add_child(game)
+	if not _expect(game.mission_index == 2 and game.expedition.modules[0] == 1 and game.expedition.archive.size() == 6 and game.expedition.alloy == 5 and game.expedition.cells == 1, "reopening game restores checkpoint, module, logs and resources"):
+		return
+	game._primary()
+	game._primary()
+	var hunter: Dictionary = game.enemies[0]
+	var wisp: Dictionary = game.enemies[1]
+	hunter["node"].position = Vector3(0, 0.5, -7)
+	game._update_enemies(1.4)
+	if not _expect(hunter["windup"] > 0 and hunter["node"].get_node("Threat").text == "ЗАЛП!", "Hunter warns before firing"):
+		return
+	game._update_enemies(0.7)
+	if not _expect(not game.expedition.shots.is_empty() and not game.expedition.shots[0]["jam"], "Hunter fires a projectile after the warning"):
+		return
+	_press(game, KEY_SPACE)
+	if not _expect(game.invulnerability > 0.0 and game.dash_remaining > 0.0, "dash grants a short dodge window"):
+		return
+	game.dash_remaining = 0.0
+	game.player.position = Vector3(0, 0, 6)
+	wisp["node"].position = Vector3(4, 0.5, -3)
+	game._update_enemies(2.1)
+	game._update_enemies(0.85)
+	var saw_jammer := false
+	for shot: Dictionary in game.expedition.shots:
+		saw_jammer = saw_jammer or shot["jam"]
+	if not _expect(saw_jammer, "Wisp deploys a delayed interference field"):
+		return
+	game.player.position = Vector3.ZERO
+	for record in [hunter, wisp]:
+		var before: int = record["hp"]
+		for i in range(before):
+			record["node"].position = Vector3(0, 0.5, -5)
+			game.ship.rotation.y = 0.0
+			game.pressed[KEY_CTRL] = true
+			game._physics_process(0.016)
+			game.pressed[KEY_CTRL] = false
+			if not _expect(record["hp"] == before - i - 1, "pulse cannon damages a drone along the aiming line"):
+				return
+			game.player.position = Vector3.ZERO
+			for frame in range(4):
+				game._physics_process(0.125)
+	if not _expect(game.enemies.is_empty() and game.expedition.threats == 2, "combat destroys Hunter and Wisp"):
+		return
+	game.player.position = game.targets[0].position
+	game.player.velocity = Vector3.ZERO
+	_press(game, KEY_F)
+	for i in range(50):
+		game._physics_process(0.2)
+	if not _expect(game.gate_active, "Orion transmits once both combat threats are gone (%.2f s, jam %.2f)" % [game.expedition.uplink_time, game.expedition.jam_time]):
+		return
+	_exit_sector(game)
+	if not _expect(game.mode == GameMode.INTERMISSION, "leaving Orion completes Silent Edge"):
+		return
+
+	game._primary()
+	for mission in range(3, 15):
+		game.mission_index = mission
+		game._start_mission()
 		game.enemies.clear()
 		game.objective_progress = game.objective_goal
 		game.gate_active = true
@@ -166,7 +238,7 @@ func _run() -> void:
 	if not _expect(game.mode == GameMode.LOST, "zero hull enters checkpoint retry state"):
 		return
 	game._primary()
-	if not _expect(game.mode == GameMode.PLAYING and game.lives == 3, "retry restores the current mission"):
+	if not _expect(game.mode == GameMode.PLAYING and game.lives == game.expedition.hull(), "retry restores the current mission"):
 		return
 
 	print("All Lumen Drift 3D campaign smoke checks passed.")

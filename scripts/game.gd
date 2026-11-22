@@ -1,8 +1,9 @@
 extends "res://scripts/visual_mesh.gd"
 
 const SilentEdge = preload("res://scripts/levels/silent_edge.gd")
+const Expedition = preload("res://scripts/levels/edge_expedition.gd")
 
-enum Mode { MENU, BRIEFING, PLAYING, PAUSED, INTERMISSION, WON, LOST }
+enum Mode { MENU, BRIEFING, PLAYING, PAUSED, INTERMISSION, WON, LOST, JOURNAL, UPGRADES }
 enum Objective { REPAIR, RECOVER, DEFEND }
 
 const MISSION_COUNT := 15
@@ -32,6 +33,9 @@ const BRIEFS := [
 ]
 const PALETTE := [Color("#4be0cc"), Color("#7dcfff"), Color("#c69cff"), Color("#ffac82"), Color("#f4e28c")]
 
+var expedition: Expedition
+var archive_page := 0
+var mouse_fire := false
 var mode := Mode.MENU
 var mission_index := 0
 var lives := 3
@@ -79,6 +83,9 @@ var preview_mode := ""
 
 func _ready() -> void:
 	rng.randomize()
+	expedition = Expedition.new()
+	add_child(expedition)
+	expedition.setup(self)
 	_setup_window()
 	_load_save()
 	_build_world()
@@ -105,13 +112,16 @@ func _exit_tree() -> void:
 		sound_player.stop()
 
 func _capture_preview() -> void:
+	if preview_mode in ["cargo", "combat", "uplink", "workshop", "archive"]:
+		await _capture_expedition_demo()
 	if preview_mode == "gameplay" and sound_enabled:
 		var peak := -200.0
 		for sample_index in range(25):
 			await get_tree().create_timer(0.025).timeout
 			peak = maxf(peak, AudioServer.get_bus_peak_volume_left_db(0, 0))
 		print("Capture audio peak (dBFS): ", peak)
-	await get_tree().create_timer(2.0).timeout
+	if preview_mode != "combat":
+		await get_tree().create_timer(2.0).timeout
 	await RenderingServer.frame_post_draw
 	var image := get_viewport().get_texture().get_image()
 	var result := image.save_png(preview_path)
@@ -119,6 +129,54 @@ func _capture_preview() -> void:
 		push_error("Could not save gameplay preview image to %s" % preview_path)
 	if not preview_mode.is_empty():
 		get_tree().quit(0 if result == OK else 1)
+
+func _capture_expedition_demo() -> void:
+	await get_tree().process_frame
+	match preview_mode:
+		"cargo":
+			expedition.scan()
+			var item: Area3D = expedition.cargo[0]
+			player.position = item.position
+			camera.reset_to(player.position)
+			expedition.tick(0.016)
+			expedition.scan()
+			_update_hud()
+		"combat":
+			mission_index = 2
+			_start_mission()
+			var hunter: Area3D = enemies[0]["node"]
+			hunter.position = Vector3(0, 0.5, -8)
+			enemies[1]["node"].position = Vector3(5, 0.5, -7)
+			expedition.update_enemy(enemies[0], 1.4)
+			expedition.tick(0.016)
+			expedition.fire()
+			_update_hud()
+		"uplink":
+			var item: Area3D = expedition.cargo[0]
+			player.position = item.position
+			expedition.tick(0.016)
+			player.position = targets[0].position
+			expedition.scan()
+			expedition.interact()
+			expedition.interact()
+			expedition.tick(0.1)
+			camera.reset_to(player.position)
+			_update_hud()
+		"workshop":
+			for item: Area3D in expedition.cargo.duplicate():
+				if item.get_meta("kind") == "alloy":
+					player.position = item.position
+					expedition.tick(0.016)
+					break
+			player.position = Vector3.ZERO
+			expedition.purchase(0)
+			_show(Mode.UPGRADES)
+		"archive":
+			mission_index = 1
+			_start_mission()
+			player.position = cores[0].position
+			_update_objectives()
+			_show(Mode.JOURNAL)
 
 func _configure_preview() -> void:
 	get_window().size = Vector2i(1280, 800)
@@ -129,6 +187,7 @@ func _configure_preview() -> void:
 		camera.reset_to(player.position)
 		return
 	set_physics_process(false)
+	expedition.tick(0.0)
 	_update_hud()
 	if preview_mode == "ship":
 		camera.position = Vector3(4.0, 3.6, -6.2)
@@ -310,13 +369,15 @@ func _build_ui() -> void:
 	ui_button.pressed.connect(_primary)
 	stack.add_child(ui_button)
 	var sound_button := Button.new()
-	sound_button.text = "Звук: M — %s  ·  WASD/стрелки · Space рывок · F действие · Esc пауза" % ("вкл" if sound_enabled else "выкл")
+	sound_button.text = "Звук: M — %s  ·  WASD/стрелки · Space рывок · Q скан · Ctrl огонь · F действие" % ("вкл" if sound_enabled else "выкл")
 	sound_button.flat = true
 	sound_button.pressed.connect(_toggle_sound)
 	stack.add_child(sound_button)
 
 func _show(next_mode: int) -> void:
 	mode = next_mode
+	if mode != Mode.PLAYING:
+		mouse_fire = false
 	ui_panel.visible = mode != Mode.PLAYING
 	hud.visible = mode == Mode.PLAYING
 	comms.visible = mode == Mode.PLAYING
@@ -335,6 +396,24 @@ func _show(next_mode: int) -> void:
 			if mission_index != 13:
 				ui_hint.text = "МОДУЛЬ %d · ищи цель по свечению. Прогресс главы сохранится." % module_rank
 			ui_button.text = "ВЫЛЕТЕТЬ"
+		Mode.JOURNAL:
+			ui_title.text = "АРХИВ «КЕПЛЕРА»"
+			if expedition.archive.is_empty():
+				ui_text.text = "В журнале пока нет записей. Ищи кристаллы памяти в секторе."
+			else:
+				archive_page = clampi(archive_page, 0, expedition.archive.size() - 1)
+				ui_text.text = "ЗАПИСЬ %d/%d\n\n%s" % [archive_page + 1, expedition.archive.size(), Expedition.LOGS[expedition.archive[archive_page]]]
+			ui_hint.text = "← / → листать · J / Esc закрыть"
+			ui_button.text = "ВЕРНУТЬСЯ В ПОЛЁТ"
+		Mode.UPGRADES:
+			ui_title.text = "МАСТЕРСКАЯ «КЕПЛЕРА»"
+			var details := ["Сплав: %d. Один модуль стоит 3.\n" % expedition.alloy]
+			var gains := ["+1 к корпусу", "+1,15 к скорости", "+0,035 с рывка", "+1 к урону", "+4 м сканирования"]
+			for i in range(5):
+				details.append("%d · %s · %d/2 · %s за уровень" % [i + 1, Expedition.TITLES[i], expedition.modules[i], gains[i]])
+			ui_text.text = "\n".join(details)
+			ui_hint.text = "1–5 купить у старта · U / Esc закрыть"
+			ui_button.text = "ВЕРНУТЬСЯ В ПОЛЁТ"
 		Mode.PAUSED:
 			ui_title.text = "ПАУЗА"
 			ui_text.text = "%s\n\nГлава %d из 5 · Миссия %d из 15\nСчёт %d · Корпус %d / 3" % [TITLES[mission_index], _chapter() + 1, mission_index + 1, score, lives]
@@ -343,7 +422,7 @@ func _show(next_mode: int) -> void:
 		Mode.INTERMISSION:
 			ui_title.text = "МИССИЯ ЗАВЕРШЕНА"
 			ui_text.text = "%s\n\n%s\n\nЛира: «Передача сохранена. Я хочу услышать её ещё раз, когда мы будем в безопасности»." % [TITLES[mission_index], BRIEFS[mission_index]]
-			ui_hint.text = "КОНТРОЛЬНАЯ ТОЧКА СОХРАНЕНА"
+			ui_hint.text = "КОНТРОЛЬНАЯ ТОЧКА СОХРАНЕНА · НАГРАДА: +2 СПЛАВА" if _chapter() == 0 else "КОНТРОЛЬНАЯ ТОЧКА СОХРАНЕНА"
 			ui_button.text = "СЛЕДУЮЩАЯ МИССИЯ"
 		Mode.WON:
 			ui_title.text = "СИГНАЛ ДОМА"
@@ -370,9 +449,13 @@ func _primary() -> void:
 			_show(Mode.BRIEFING)
 		Mode.BRIEFING:
 			_start_mission()
-		Mode.PAUSED:
+		Mode.PAUSED, Mode.JOURNAL, Mode.UPGRADES:
 			_show(Mode.PLAYING)
 		Mode.LOST:
+			if _chapter() == 0:
+				var previous := ConfigFile.new()
+				previous.load(SAVE_PATH)
+				expedition.restore(previous)
 			_start_mission()
 		Mode.INTERMISSION:
 			if mission_index % 3 == 2 and mission_index < MISSION_COUNT - 1:
@@ -389,13 +472,14 @@ func _primary() -> void:
 			mission_index = 0
 			score = 0
 			module_rank = 0
+			expedition.restore(ConfigFile.new())
 			campaign_completed = false
 			campaign_started = true
 			_save(0)
 			_show(Mode.BRIEFING)
 
 func _start_mission() -> void:
-	lives = 3
+	lives = expedition.hull()
 	objective_progress = 0
 	mission_clock = 0
 	rng.seed = 218900 + mission_index * 7919
@@ -410,13 +494,19 @@ func _start_mission() -> void:
 	camera.reset_to(player.position)
 	objective_kind = mission_index % 3
 	objective_goal = 6 if objective_kind == Objective.RECOVER else (90 if objective_kind == Objective.DEFEND else 3 + _chapter())
+	if mission_index == 2:
+		objective_goal = 1
 	_clear_arena()
 	orbit.set_chapter(_chapter(), PALETTE[_chapter()])
 	_spawn_landmarks()
 	_spawn_obstacles(8 + _chapter() * 2)
 	_spawn_objectives()
 	_spawn_enemies(2 + _chapter())
+	if _chapter() == 0:
+		expedition.start_sector()
 	_show(Mode.PLAYING)
+	if _chapter() == 0:
+		comms.text = ["ЛИРА: Q сканирует сектор. Ищи ячейки, чтобы запитать три маяка.", "ЛИРА: собери шесть записей. J откроет архив. Сигнал капсулы — дополнительная цель.", "ЛИРА: Hunter готовит залп, Wisp глушит связь. Ctrl — выстрел по курсу, Space — уклонение."][mission_index]
 
 func _clear_arena() -> void:
 	for node in arena.get_children():
@@ -491,8 +581,9 @@ func _spawn_objectives() -> void:
 			crystal.accent = PALETTE[_chapter()]
 			crystal.rotation_degrees = Vector3(12, float(i) * 37.0, 18)
 			core.add_child(crystal)
+			core.set_meta("log", i)
 			cores.append(core)
-	elif objective_kind == Objective.REPAIR:
+	elif objective_kind == Objective.REPAIR or mission_index == 2:
 		for i in range(objective_goal):
 			var pos := SilentEdge.RELAYS[i] if _chapter() == 0 else Vector3(rng.randf_range(-14, 14), 0, rng.randf_range(-14, 14))
 			if pos.length() < 5:
@@ -501,6 +592,10 @@ func _spawn_objectives() -> void:
 			_build_relay_silhouette(target, Vector3.ZERO, PALETTE[_chapter()], false)
 			if _chapter() == 0:
 				_relay_marker(target, i)
+				if mission_index == 0:
+					target.get_node("RelayMarker").hide()
+				else:
+					target.get_node("RelayMarker").text = "ОРИОН · канал заглушён"
 			targets.append(target)
 
 func _spawn_enemies(count: int) -> void:
@@ -519,7 +614,19 @@ func _spawn_enemies(count: int) -> void:
 		visual.wisp = i % 2 == 1
 		enemy.add_child(visual)
 		arena.add_child(enemy)
-		enemies.append({"node": enemy, "speed": 2.6 + float(_chapter()) * 0.5, "phase": rng.randf_range(0.0, TAU)})
+		var record := {"node": enemy, "speed": 2.6 + float(_chapter()) * 0.5, "phase": rng.randf_range(0.0, TAU)}
+		if _chapter() == 0:
+			record.merge({"hp": 3 if i % 2 == 0 else 2, "attack": 1.2 + i * 0.7, "windup": 0.0})
+			var threat := Label3D.new()
+			threat.name = "Threat"
+			threat.text = "%s · %d" % [enemy.name, record["hp"]]
+			threat.position.y = 1.25
+			threat.font_size = 26
+			threat.pixel_size = 0.009
+			threat.modulate = Color("#e1acff") if visual.wisp else Color("#ffb18a")
+			threat.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			enemy.add_child(threat)
+		enemies.append(record)
 
 func _area(label: String, pos: Vector3, radius: float) -> Area3D:
 	var area := Area3D.new()
@@ -541,7 +648,7 @@ func _physics_process(delta: float) -> void:
 	dash_remaining = maxf(0.0, dash_remaining - delta)
 	invulnerability = maxf(0.0, invulnerability - delta)
 	var move := Vector2(float(_down(KEY_D) or _down(KEY_RIGHT)) - float(_down(KEY_A) or _down(KEY_LEFT)), float(_down(KEY_S) or _down(KEY_DOWN)) - float(_down(KEY_W) or _down(KEY_UP))).normalized()
-	var speed := DASH_SPEED + float(module_rank) * 2.0 if dash_remaining > 0 else PLAYER_SPEED + float(module_rank) * 0.75
+	var speed := DASH_SPEED + float(module_rank) * 2.0 if dash_remaining > 0 else PLAYER_SPEED + float(module_rank) * 0.75 + float(expedition.modules[1]) * 1.15
 	player.velocity.x = move_toward(player.velocity.x, move.x * speed, 35.0 * delta)
 	player.velocity.z = move_toward(player.velocity.z, move.y * speed, 35.0 * delta)
 	if dash_remaining > 0:
@@ -561,7 +668,11 @@ func _physics_process(delta: float) -> void:
 	camera.follow(player.position, player.velocity, delta)
 	_update_enemies(delta)
 	_update_objectives()
-	if objective_kind == Objective.DEFEND:
+	if _chapter() == 0:
+		expedition.tick(delta)
+		if _down(KEY_CTRL) or mouse_fire:
+			expedition.fire()
+	if objective_kind == Objective.DEFEND and mission_index != 2:
 		defense_time += delta
 		objective_progress = mini(int(defense_time), objective_goal)
 		if defense_time >= objective_goal:
@@ -602,10 +713,21 @@ func _process(_delta: float) -> void:
 	if _once(KEY_SPACE) and dash_cooldown <= 0:
 		var move := Vector3(float(_down(KEY_D) or _down(KEY_RIGHT)) - float(_down(KEY_A) or _down(KEY_LEFT)), 0, float(_down(KEY_S) or _down(KEY_DOWN)) - float(_down(KEY_W) or _down(KEY_UP)))
 		dash_direction = move.normalized() if move.length_squared() > 0.01 else Vector3(-sin(ship.rotation.y), 0, -cos(ship.rotation.y))
-		dash_remaining = DASH_DURATION
+		dash_remaining = DASH_DURATION + float(expedition.modules[2]) * 0.035
 		dash_cooldown = maxf(0.65, DASH_COOLDOWN - float(module_rank) * 0.1)
 		_tone(590.0, 0.1)
 		invulnerability = maxf(invulnerability, 0.3)
+	if _chapter() == 0:
+		if _once(KEY_Q):
+			expedition.scan()
+		if _once(KEY_R):
+			expedition.repair()
+		if _once(KEY_J):
+			_show(Mode.JOURNAL)
+			return
+		if _once(KEY_U):
+			_show(Mode.UPGRADES)
+			return
 	if _once(KEY_F):
 		_interact()
 	if _once(KEY_ESCAPE):
@@ -615,6 +737,9 @@ func _update_enemies(delta: float) -> void:
 	for record in enemies:
 		var enemy: Area3D = record["node"]
 		if not is_instance_valid(enemy):
+			continue
+		if _chapter() == 0 and record.has("hp"):
+			expedition.update_enemy(record, delta)
 			continue
 		var toward := player.position - enemy.position
 		if toward.length_squared() > 0.01:
@@ -631,18 +756,25 @@ func _update_objectives() -> void:
 	for i in range(cores.size() - 1, -1, -1):
 		var core := cores[i]
 		if is_instance_valid(core) and core.position.distance_to(player.position) < 1.25:
+			if mission_index == 1:
+				expedition.remember(int(core.get_meta("log", 0)))
+				expedition.pulse(core.position, Color("#abefee"), 1.2)
 			core.queue_free()
 			cores.remove_at(i)
 			objective_progress += 1
 			score += 100
 			_tone(470.0 + objective_progress * 35.0, 0.1)
-		comms.text = "ЛИРА: «Фрагмент памяти %d из %d. В записи слышно дыхание экипажа»" % [objective_progress, objective_goal]
+			if mission_index != 1:
+				comms.text = "ЛИРА: «Фрагмент памяти %d из %d. В записи слышно дыхание экипажа»" % [objective_progress, objective_goal]
 	if objective_kind == Objective.RECOVER and objective_progress >= objective_goal:
 		_activate_gate()
 	if objective_kind == Objective.REPAIR and objective_progress >= objective_goal:
 		_activate_gate()
 
 func _interact() -> void:
+	if _chapter() == 0:
+		expedition.interact()
+		return
 	if objective_kind != Objective.REPAIR:
 		return
 	for i in range(targets.size() - 1, -1, -1):
@@ -678,7 +810,8 @@ func _take_hit() -> void:
 	if player.position.length_squared() > 0.01:
 		player.velocity = player.position.normalized() * 7.0
 	if lives <= 0:
-		_save(mission_index)
+		if _chapter() != 0:
+			_save(mission_index)
 		_show(Mode.LOST)
 
 func take_hit() -> void:
@@ -688,10 +821,16 @@ func _finish_mission() -> void:
 	if mode != Mode.PLAYING:
 		return
 	score += 500 + int(maxf(0.0, 120.0 - mission_clock) * 4.0)
+	if _chapter() == 0:
+		expedition.alloy += 2
 	_save(mission_index + 1)
 	_show(Mode.INTERMISSION)
 
 func _objective_text() -> String:
+	match mission_index:
+		0: return "просканируй сектор, найди ячейки, запитай маяки и удержи связь до окончания каждой передачи."
+		1: return "извлеки записи экипажа из шести кристаллов. Отметь пропавшую капсулу, если увидишь её сигнал."
+		2: return "сбей Hunter и Wisp, очисти канал «Ориона» и удержи связь шесть секунд."
 	match objective_kind:
 		Objective.REPAIR:
 			return "найди и активируй %d узла (F рядом с узлом), затем долети до портала" % (3 + _chapter())
@@ -705,21 +844,49 @@ func _update_hud() -> void:
 	if not is_instance_valid(hud):
 		return
 	var progress := "%d/%d" % [objective_progress, objective_goal]
-	if objective_kind == Objective.DEFEND:
+	if objective_kind == Objective.DEFEND and mission_index != 2:
 		progress = "%02d:%02d" % [int(defense_time) / 60, int(defense_time) % 60]
 	var goal := "ПОРТАЛ ОТКРЫТ" if gate_active else "ЦЕЛЬ %s" % progress
+	if mission_index == 2 and not gate_active and expedition.threats < 2:
+		goal = "ДРОНЫ %d/2" % expedition.threats
 	hud.text = "ГЛАВА %d/5 · МИССИЯ %02d/15   %s   %s   КОРПУС %d/3   СЧЁТ %06d" % [_chapter() + 1, mission_index + 1, TITLES[mission_index], goal, lives, score]
+	if _chapter() == 0:
+		hud.text = hud.text.replace("КОРПУС %d/3" % lives, "КОРПУС %d/%d" % [lives, expedition.hull()]) + "\n" + expedition.hud_line()
 
 func _on_focus_lost() -> void:
 	if mode == Mode.PLAYING:
+		pressed.clear()
 		_show(Mode.PAUSED)
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		mouse_fire = mode == Mode.PLAYING and event.pressed
 	if event is InputEventKey:
 		var key := event as InputEventKey
 		pressed[key.keycode] = key.pressed
 		pressed[key.physical_keycode] = key.pressed
 		if key.pressed and not key.echo:
+			if mode == Mode.JOURNAL:
+				if key.keycode == KEY_LEFT:
+					archive_page -= 1
+					_show(Mode.JOURNAL)
+				elif key.keycode == KEY_RIGHT:
+					archive_page += 1
+					_show(Mode.JOURNAL)
+				elif key.keycode == KEY_J or key.keycode == KEY_ESCAPE or key.keycode == KEY_ENTER:
+					pressed.clear()
+					_show(Mode.PLAYING)
+				return
+			if mode == Mode.UPGRADES:
+				if key.keycode >= KEY_1 and key.keycode <= KEY_5:
+					expedition.purchase(key.keycode - KEY_1)
+					var result := comms.text
+					_show(Mode.UPGRADES)
+					ui_hint.text = result
+				elif key.keycode == KEY_U or key.keycode == KEY_ESCAPE or key.keycode == KEY_ENTER:
+					pressed.clear()
+					_show(Mode.PLAYING)
+				return
 			if key.keycode == KEY_ESCAPE and mode == Mode.PLAYING:
 				_show(Mode.PAUSED)
 			elif key.keycode == KEY_ESCAPE and mode == Mode.PAUSED:
@@ -757,11 +924,13 @@ func _save(checkpoint: int) -> void:
 	cfg.set_value("campaign", "score", score)
 	cfg.set_value("campaign", "best_score", best_score)
 	cfg.set_value("campaign", "module_rank", module_rank)
+	expedition.save_to(cfg)
 	cfg.save(SAVE_PATH)
 
 func _load_save() -> void:
 	var cfg := ConfigFile.new()
 	if cfg.load(SAVE_PATH) == OK:
+		expedition.restore(cfg)
 		campaign_completed = bool(cfg.get_value("campaign", "complete", false))
 		mission_index = clampi(int(cfg.get_value("campaign", "checkpoint", 0)), 0, MISSION_COUNT - 1)
 		score = int(cfg.get_value("campaign", "score", 0))

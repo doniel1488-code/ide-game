@@ -210,7 +210,12 @@ jobs:
             @{ Path = (Join-Path $previewDir 'LumenDrift-kepler.png'); Mode = 'ship' },
             @{ Path = (Join-Path $previewDir 'LumenDrift-relay.png'); Mode = 'relay' },
             @{ Path = (Join-Path $previewDir 'LumenDrift-flight.png'); Mode = 'flight' },
-            @{ Path = (Join-Path $previewDir 'LumenDrift-asteroids.png'); Mode = 'asteroids' }
+            @{ Path = (Join-Path $previewDir 'LumenDrift-asteroids.png'); Mode = 'asteroids' },
+            @{ Path = (Join-Path $previewDir 'LumenDrift-cargo.png'); Mode = 'cargo' },
+            @{ Path = (Join-Path $previewDir 'LumenDrift-combat.png'); Mode = 'combat' },
+            @{ Path = (Join-Path $previewDir 'LumenDrift-uplink.png'); Mode = 'uplink' },
+            @{ Path = (Join-Path $previewDir 'LumenDrift-workshop.png'); Mode = 'workshop' },
+            @{ Path = (Join-Path $previewDir 'LumenDrift-archive.png'); Mode = 'archive' }
           )
           foreach ($capture in $captures) {
             Remove-Item -LiteralPath $capture.Path -Force -ErrorAction SilentlyContinue
@@ -264,6 +269,11 @@ jobs:
             dist/LumenDrift-relay.png
             dist/LumenDrift-flight.png
             dist/LumenDrift-asteroids.png
+            dist/LumenDrift-cargo.png
+            dist/LumenDrift-combat.png
+            dist/LumenDrift-uplink.png
+            dist/LumenDrift-workshop.png
+            dist/LumenDrift-archive.png
             website/
           if-no-files-found: error
           retention-days: 30
