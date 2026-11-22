@@ -28,7 +28,7 @@ Lumen Drift — законченная небольшая аркада на Godo
 Для локальной сборки установите Godot 4.7.2 и Windows export templates, затем выполните:
 
 ```powershell
-godot --headless --path . --editor --quit
+godot --headless --path . --quit-after 3
 godot --headless --path . --script res://tests/smoke_test.gd
 godot --headless --path . --export-release "Windows Desktop" build/LumenDrift.exe
 ```
