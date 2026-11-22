@@ -41,6 +41,9 @@ func _run() -> void:
 	game._process(0.016)
 	if not _expect(game.lives == 2 and game.player_invulnerable > 1.0, "enemy collision removes one life and grants recovery time"):
 		return
+	game._process(0.016)
+	if not _expect(game.lives == 2, "repeated enemy contact is blocked during invulnerability"):
+		return
 	game.enemies.clear()
 	game.player_velocity = Vector2.ZERO
 
