@@ -1,0 +1,120 @@
+name: Build Windows portable game
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Godot and Windows export templates
+        shell: pwsh
+        run: |
+          $version = '4.7.2'
+          $tempRoot = Join-Path $env:RUNNER_TEMP 'godot'
+          $engineZip = Join-Path $tempRoot 'godot.zip'
+          $templateZip = Join-Path $tempRoot 'templates.zip'
+          $engineExtract = Join-Path $tempRoot 'engine'
+          $templateExtract = Join-Path $tempRoot 'template-files'
+          New-Item -ItemType Directory -Force -Path $tempRoot, $engineExtract, $templateExtract | Out-Null
+
+          curl.exe --fail --location --retry 4 --output $engineZip "https://downloads.godotengine.org/?flavor=stable&platform=windows.64&slug=win64.exe.zip&version=$version"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not download the official Godot Windows editor.' }
+          curl.exe --fail --location --retry 4 --output $templateZip "https://downloads.godotengine.org/?flavor=stable&platform=templates&slug=export_templates.tpz&version=$version"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not download the official Windows export templates.' }
+
+          Expand-Archive -LiteralPath $engineZip -DestinationPath $engineExtract -Force
+          Expand-Archive -LiteralPath $templateZip -DestinationPath $templateExtract -Force
+          $engine = Get-ChildItem -Path $engineExtract -Filter 'Godot_v4.7.2-stable_win64.exe' -Recurse | Select-Object -First 1
+          if (-not $engine) { throw 'Godot executable was missing from the official archive.' }
+          $templateSource = Join-Path $templateExtract 'templates'
+          if (-not (Test-Path -LiteralPath $templateSource)) { throw 'Export templates archive has an unexpected layout.' }
+          $templateDestination = Join-Path $env:APPDATA 'Godot\export_templates\4.7.2.stable'
+          New-Item -ItemType Directory -Force -Path $templateDestination | Out-Null
+          Copy-Item -Path (Join-Path $templateSource '*') -Destination $templateDestination -Recurse -Force
+          if (-not (Test-Path (Join-Path $templateDestination 'windows_release_x86_64.exe'))) { throw 'Windows x64 release template was not installed.' }
+          "GODOT_EXE=$($engine.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Import project and run gameplay tests
+        shell: pwsh
+        run: |
+          & $env:GODOT_EXE --headless --path . --editor --quit
+          if ($LASTEXITCODE -ne 0) { throw 'Godot could not import the desktop project.' }
+          & $env:GODOT_EXE --headless --path . --script res://tests/smoke_test.gd
+          if ($LASTEXITCODE -ne 0) { throw 'Gameplay smoke test failed.' }
+
+      - name: Export Windows x64 executable
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build | Out-Null
+          & $env:GODOT_EXE --headless --path . --export-release 'Windows Desktop' build/LumenDrift.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Godot Windows x64 export failed.' }
+          if (-not (Test-Path -LiteralPath 'build/LumenDrift.exe')) { throw 'Export did not produce LumenDrift.exe.' }
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path 'build/LumenDrift.exe'))
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+          $signature = [BitConverter]::ToUInt32($bytes, $peOffset)
+          $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          if ($signature -ne 0x00004550 -or $machine -ne 0x8664) { throw 'Exported executable is not a Windows x64 PE file.' }
+          $info = Get-Item 'build/LumenDrift.exe'
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Windows x64 PE verified: ``LumenDrift.exe`` ($([math]::Round($info.Length / 1MB, 2)) MiB)"
+
+      - name: Launch exported game on Windows
+        shell: pwsh
+        run: |
+          $game = Start-Process -FilePath (Resolve-Path 'build/LumenDrift.exe') -WorkingDirectory (Resolve-Path 'build') -PassThru
+          Start-Sleep -Seconds 6
+          $game.Refresh()
+          if ($game.HasExited) { throw "Game process exited during startup (code $($game.ExitCode))." }
+          Stop-Process -Id $game.Id -Force
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '- Windows runner launch: process remained open for 6 seconds.'
+
+      - name: Package portable ZIP
+        shell: pwsh
+        run: |
+          $package = Join-Path $env:RUNNER_TEMP 'LumenDrift-portable'
+          New-Item -ItemType Directory -Force -Path $package | Out-Null
+          Copy-Item 'build/LumenDrift.exe' $package
+          @'
+          LUMEN DRIFT — WINDOWS x64
+
+          Run LumenDrift.exe. No browser, server, Python, Node.js, or Godot installation is required.
+          Controls: WASD or arrows to move, Space to dash, Escape to pause, M to toggle sound.
+          Windows 10/11 x64 with OpenGL 3.3 compatible graphics drivers.
+          '@ | Set-Content -Path (Join-Path $package 'README.txt') -Encoding utf8
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path (Join-Path $package '*') -DestinationPath 'dist/LumenDrift-Windows-x64.zip' -Force
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path 'dist/LumenDrift-Windows-x64.zip'))
+          try {
+            if (-not ($archive.Entries | Where-Object { $_.FullName -eq 'LumenDrift.exe' })) { throw 'Portable ZIP is missing the game executable.' }
+          } finally { $archive.Dispose() }
+          $zipInfo = Get-Item 'dist/LumenDrift-Windows-x64.zip'
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Portable archive contains ``LumenDrift.exe`` and ``README.txt`` ($([math]::Round($zipInfo.Length / 1MB, 2)) MiB)."
+
+      - name: Upload portable ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumenDrift-Windows-x64
+          path: dist/LumenDrift-Windows-x64.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Lumen Drift ${{ github.ref_name }}
+          generate_release_notes: true
+          files: dist/LumenDrift-Windows-x64.zip
+
