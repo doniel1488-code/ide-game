@@ -125,14 +125,22 @@ jobs:
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $extract = Join-Path $env:RUNNER_TEMP 'LumenDrift-from-zip'
           [System.IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path 'dist/LumenDrift-Windows-x64.zip'), $extract, $true)
-          $game = Start-Process -FilePath (Join-Path $extract 'LumenDrift.exe') -WorkingDirectory $extract -PassThru
-          Start-Sleep -Seconds 8
-          $game.Refresh()
-          if ($game.HasExited) { throw "Extracted game exited during startup (code $($game.ExitCode))." }
-          $window = Get-Process -Id $game.Id
-          if ($window.MainWindowHandle -eq 0) { throw 'The extracted game process has no visible main window.' }
-          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Portable ZIP extracted and its visible window stayed open for 8 seconds (PID $($game.Id))."
-          Stop-Process -Id $game.Id -Force
+          $exe = Join-Path $extract 'LumenDrift.exe'
+          $ruleName = "LumenDrift-offline-$PID"
+          New-NetFirewallRule -DisplayName $ruleName -Direction Outbound -Program $exe -Action Block -Profile Any | Out-Null
+          try {
+            $game = Start-Process -FilePath $exe -WorkingDirectory $extract -PassThru
+            Start-Sleep -Seconds 8
+            $game.Refresh()
+            if ($game.HasExited) { throw "Extracted game exited during startup (code $($game.ExitCode))." }
+            $window = Get-Process -Id $game.Id
+            if ($window.MainWindowHandle -eq 0) { throw 'The extracted game process has no visible main window.' }
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Portable ZIP opened a visible game window for 8 seconds with outbound network blocked (PID $($game.Id))."
+            Stop-Process -Id $game.Id -Force
+          } finally {
+            if ($game -and -not $game.HasExited) { Stop-Process -Id $game.Id -Force }
+            Remove-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
+          }
 
       - name: Upload portable game and website artifacts
         uses: actions/upload-artifact@v4
