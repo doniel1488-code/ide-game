@@ -35,6 +35,7 @@ var mission_index := 0
 var lives := 3
 var score := 0
 var best_score := 0
+var module_rank := 0
 var objective_progress := 0
 var objective_goal := 3
 var objective_kind := Objective.REPAIR
@@ -309,6 +310,8 @@ func _show(next_mode: int) -> void:
 			ui_title.text = "%s · МИССИЯ %02d" % [CHAPTERS[_chapter()], mission_index + 1]
 			ui_text.text = "%s\n\n%s\n\nЗадача: %s" % [TITLES[mission_index], BRIEFS[mission_index], _objective_text()]
 			ui_hint.text = "1 — сохранить голос архива · 2 — удалить эхо" if mission_index == 13 else "После вылета ищи цель по свечению. Прогресс главы сохранится."
+			if mission_index != 13:
+				ui_hint.text = "МОДУЛЬ %d · ищи цель по свечению. Прогресс главы сохранится." % module_rank
 			ui_button.text = "ВЫЛЕТЕТЬ"
 		Mode.PAUSED:
 			ui_title.text = "ПАУЗА"
@@ -347,6 +350,8 @@ func _primary() -> void:
 		Mode.LOST:
 			_start_mission()
 		Mode.INTERMISSION:
+			if mission_index % 3 == 2 and mission_index < MISSION_COUNT - 1:
+				module_rank = mini(module_rank + 1, 5)
 			if mission_index == MISSION_COUNT - 1:
 				best_score = maxi(best_score, score)
 				_save(MISSION_COUNT)
@@ -358,6 +363,7 @@ func _primary() -> void:
 		Mode.WON:
 			mission_index = 0
 			score = 0
+			module_rank = 0
 			campaign_started = true
 			_save(0)
 			_show(Mode.BRIEFING)
@@ -508,12 +514,12 @@ func _physics_process(delta: float) -> void:
 	dash_remaining = maxf(0.0, dash_remaining - delta)
 	invulnerability = maxf(0.0, invulnerability - delta)
 	var move := Vector2(float(_down(KEY_D) or _down(KEY_RIGHT)) - float(_down(KEY_A) or _down(KEY_LEFT)), float(_down(KEY_S) or _down(KEY_DOWN)) - float(_down(KEY_W) or _down(KEY_UP))).normalized()
-	var speed := DASH_SPEED if dash_remaining > 0 else PLAYER_SPEED
+	var speed := DASH_SPEED + float(module_rank) * 2.0 if dash_remaining > 0 else PLAYER_SPEED + float(module_rank) * 0.75
 	player.velocity.x = move_toward(player.velocity.x, move.x * speed, 35.0 * delta)
 	player.velocity.z = move_toward(player.velocity.z, move.y * speed, 35.0 * delta)
 	if dash_remaining > 0:
-		player.velocity.x = dash_direction.x * DASH_SPEED
-		player.velocity.z = dash_direction.z * DASH_SPEED
+		player.velocity.x = dash_direction.x * (DASH_SPEED + float(module_rank) * 2.0)
+		player.velocity.z = dash_direction.z * (DASH_SPEED + float(module_rank) * 2.0)
 	player.move_and_slide()
 	if player.velocity.length_squared() > 0.2:
 		ship.rotation.y = lerp_angle(ship.rotation.y, atan2(-player.velocity.x, -player.velocity.z), 8.0 * delta)
@@ -538,7 +544,7 @@ func _process(_delta: float) -> void:
 		var move := Vector3(float(_down(KEY_D) or _down(KEY_RIGHT)) - float(_down(KEY_A) or _down(KEY_LEFT)), 0, float(_down(KEY_S) or _down(KEY_DOWN)) - float(_down(KEY_W) or _down(KEY_UP)))
 		dash_direction = move.normalized() if move.length_squared() > 0.01 else Vector3(-sin(ship.rotation.y), 0, -cos(ship.rotation.y))
 		dash_remaining = DASH_DURATION
-		dash_cooldown = DASH_COOLDOWN
+		dash_cooldown = maxf(0.65, DASH_COOLDOWN - float(module_rank) * 0.1)
 		_tone(590.0, 0.1)
 		invulnerability = maxf(invulnerability, 0.3)
 	if _once(KEY_F):
@@ -601,7 +607,7 @@ func _take_hit() -> void:
 	if invulnerability > 0 or mode != Mode.PLAYING:
 		return
 	lives -= 1
-	invulnerability = 1.4
+	invulnerability = 1.4 + float(module_rank) * 0.1
 	_tone(140.0, 0.2)
 	comms.text = "ЛИРА: «Удар по корпусу. Я удержу управление, пока щит перезаряжается»"
 	if player.position.length_squared() > 0.01:
@@ -683,6 +689,7 @@ func _save(checkpoint: int) -> void:
 	cfg.set_value("campaign", "checkpoint", clampi(checkpoint, 0, MISSION_COUNT))
 	cfg.set_value("campaign", "score", score)
 	cfg.set_value("campaign", "best_score", best_score)
+	cfg.set_value("campaign", "module_rank", module_rank)
 	cfg.save(SAVE_PATH)
 
 func _load_save() -> void:
@@ -691,6 +698,7 @@ func _load_save() -> void:
 		mission_index = clampi(int(cfg.get_value("campaign", "checkpoint", 0)), 0, MISSION_COUNT - 1)
 		score = int(cfg.get_value("campaign", "score", 0))
 		best_score = int(cfg.get_value("campaign", "best_score", 0))
+		module_rank = clampi(int(cfg.get_value("campaign", "module_rank", 0)), 0, 5)
 		campaign_started = mission_index > 0 or score > 0
 
 func _chapter() -> int:
