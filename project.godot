@@ -1,19 +1,19 @@
 ; Engine configuration file.
-; Lumen Drift — Windows desktop edition.
+; Lumen Drift — Godot 4 Windows 3D campaign.
 config_version=5
 
 [application]
 
 config/name="Lumen Drift"
-config/description="A five-sector arcade rescue mission. Restore the signal."
+config/description="A narrative 3D sci-fi campaign across five chapters."
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://assets/icon.svg"
 
 [display]
 
-window/size/viewport_width=960
-window/size/viewport_height=600
+window/size/viewport_width=1280
+window/size/viewport_height=800
 window/size/window_width_override=1280
 window/size/window_height_override=800
 window/size/window_width_override_min=960
@@ -25,9 +25,8 @@ window/stretch/aspect="keep"
 
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
-environment/defaults/default_clear_color=Color(0.027, 0.06, 0.08, 1)
+environment/defaults/default_clear_color=Color(0.02, 0.04, 0.07, 1)
 
 [audio]
 
 driver/enable_input=false
-
