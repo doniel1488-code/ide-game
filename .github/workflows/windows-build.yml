@@ -41,13 +41,13 @@ jobs:
           if (-not (Test-Path (Join-Path $templateDestination 'windows_release_x86_64.exe'))) { throw 'Windows x64 release template was not installed.' }
           "GODOT_EXE=$($engine.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Import project and run gameplay tests
+      - name: Import project and run 3D campaign checks
         shell: pwsh
         run: |
           & $env:GODOT_EXE --headless --path . --quit-after 3
           if ($LASTEXITCODE -ne 0) { throw 'Godot could not start the desktop project.' }
           & $env:GODOT_EXE --headless --path . --script res://tests/smoke_test.gd
-          if ($LASTEXITCODE -ne 0) { throw 'Gameplay smoke test failed.' }
+          if ($LASTEXITCODE -ne 0) { throw '3D campaign smoke checks failed.' }
 
       - name: Export Windows x64 executable
         shell: pwsh
@@ -68,7 +68,7 @@ jobs:
         shell: pwsh
         run: |
           $game = Start-Process -FilePath (Resolve-Path 'build/LumenDrift.exe') -WorkingDirectory (Resolve-Path 'build') -PassThru
-          Start-Sleep -Seconds 6
+          Start-Sleep -Seconds 8
           $game.Refresh()
           if ($game.HasExited) { throw "Game process exited during startup (code $($game.ExitCode))." }
           Stop-Process -Id $game.Id -Force
@@ -101,7 +101,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: LumenDrift-Windows-x64
-          path: dist/LumenDrift-Windows-x64.zip
+          path: |
+            dist/LumenDrift-Windows-x64.zip
+            website/
           if-no-files-found: error
           retention-days: 30
 
