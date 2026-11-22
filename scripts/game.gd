@@ -324,9 +324,10 @@ func _begin_sector() -> void:
 		var horizontal := rng.randf() < 0.5
 		var position := Vector2(rng.randf_range(160.0, 780.0), rng.randf_range(112.0, 510.0))
 		var size := Vector2(rng.randf_range(95.0, 178.0), rng.randf_range(13.0, 19.0)) if horizontal else Vector2(rng.randf_range(13.0, 19.0), rng.randf_range(82.0, 165.0))
+		var obstacle := Rect2(position, size)
 		var safe_center := obstacle.get_center()
-		if safe_center.distance_to(WORLD / 2.0) > 150.0 and safe_center.distance_to(portal_position) > 120.0 and not _touches_wall(WORLD / 2.0, PLAYER_RADIUS + 3.0):
-			walls.append(Rect2(position, size))
+		if safe_center.distance_to(WORLD / 2.0) > 150.0 and safe_center.distance_to(portal_position) > 120.0 and not obstacle.grow(PLAYER_RADIUS + 3.0).has_point(WORLD / 2.0):
+			walls.append(obstacle)
 	for index in range(CORE_GOAL):
 		cores.append(_find_open_position(105.0, 80.0))
 	var enemy_count := mini(2 + sector, 6)
