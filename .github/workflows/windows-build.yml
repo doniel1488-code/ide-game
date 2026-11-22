@@ -45,15 +45,55 @@ jobs:
           if (-not (Test-Path (Join-Path $templateDestination 'windows_release_x86_64.exe'))) { throw 'Windows x64 release template was not installed.' }
           "GODOT_EXE=$($engine.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Import project and run 3D campaign checks
+      - name: Record Godot version
+        id: godot_version
+        continue-on-error: true
         shell: pwsh
         run: |
-          & $env:GODOT_EXE --headless --path . --quit-after 3
-          if ($LASTEXITCODE -ne 0) { throw 'Godot could not import and start the desktop project.' }
-          & $env:GODOT_EXE --headless --path . --script res://tests/smoke_test.gd
-          if ($LASTEXITCODE -ne 0) { throw '3D campaign smoke checks failed.' }
+          & ./scripts/ci/run_godot.ps1 -Name version --version
+
+      - name: Import Godot project in headless editor
+        id: godot_import
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          & ./scripts/ci/run_godot.ps1 -Name import --headless --editor --path . --quit --verbose
+
+      - name: Start main scene headlessly
+        id: godot_scene
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          & ./scripts/ci/run_godot.ps1 -Name scene --headless --path . --quit-after 3 --verbose
+
+      - name: Run campaign smoke test
+        id: godot_smoke
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          & ./scripts/ci/run_godot.ps1 -Name smoke --headless --path . --script res://tests/smoke_test.gd --verbose
           $gameCode = Get-Content 'scripts/game.gd' -Raw
           if ($gameCode -match 'HTTPRequest|HTTPClient|WebSocketPeer|TCPServer|StreamPeerTCP') { throw 'Game code must not require network access.' }
+
+      - name: Gate export on all Godot diagnostics
+        if: always()
+        shell: pwsh
+        run: |
+          $failed = @()
+          if ('${{ steps.godot_version.outcome }}' -ne 'success') { $failed += 'version' }
+          if ('${{ steps.godot_import.outcome }}' -ne 'success') { $failed += 'editor import' }
+          if ('${{ steps.godot_scene.outcome }}' -ne 'success') { $failed += 'main scene startup' }
+          if ('${{ steps.godot_smoke.outcome }}' -ne 'success') { $failed += 'campaign smoke test/network audit' }
+          if ($failed.Count -gt 0) { throw "Godot diagnostics failed: $($failed -join ', '). See printed logs and godot-diagnostics artifact." }
+
+      - name: Upload Godot diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Godot-diagnostics
+          path: ${{ runner.temp }}/godot-diagnostics/
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Export Windows x64 and inspect dependencies
         shell: pwsh
