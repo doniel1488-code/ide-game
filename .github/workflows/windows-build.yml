@@ -215,15 +215,14 @@ jobs:
             $arguments = @('--', ('"--capture-preview={0}"' -f $capture.Path), "--capture-mode=$($capture.Mode)")
             if ($capture.Menu) { $arguments += '--capture-menu' }
             $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru
-            $deadline = (Get-Date).AddSeconds(20)
-            while (-not (Test-Path -LiteralPath $capture.Path) -and (Get-Date) -lt $deadline -and -not $process.HasExited) { Start-Sleep -Milliseconds 400 }
-            if (-not (Test-Path -LiteralPath $capture.Path)) {
-              if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
-              throw "Game did not save preview screenshot: $($capture.Path)"
+            if (-not $process.WaitForExit(45000)) {
+              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+              throw "Timed out capturing $($capture.Mode)."
             }
+            if ($process.ExitCode -ne 0) { throw "Capture $($capture.Mode) exited with code $($process.ExitCode)." }
+            if (-not (Test-Path -LiteralPath $capture.Path)) { throw "Game did not save preview screenshot: $($capture.Path)" }
             $image = Get-Item -LiteralPath $capture.Path
             if ($image.Length -lt 10000) { throw "Captured preview is unexpectedly small: $($image.Length) bytes." }
-            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Captured actual game screenshot $($image.Name) ($([math]::Round($image.Length / 1KB)) KiB)."
           }
 
