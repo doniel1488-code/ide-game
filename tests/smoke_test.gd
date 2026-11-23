@@ -29,6 +29,86 @@ func _exit_sector(game) -> void:
 	game.player.velocity = Vector3.ZERO
 	game._physics_process(0.016)
 
+func _visit(game, point: Vector3) -> void:
+	game.player.position = point
+	game.player.velocity = Vector3.ZERO
+	game._physics_process(0.016)
+
+func _blind_orbit(game) -> bool:
+	game._primary()
+	game._primary()
+	var orbit = game.blind_orbit
+	var first: Vector3 = orbit.ROUTE[0]
+	_visit(game, first + Vector3.BACK)
+	_visit(game, first + Vector3.FORWARD)
+	if not _expect(orbit.route_step == 0, "unscanned navigation signal does not count"):
+		return false
+	for point in orbit.ROUTE:
+		_visit(game, point + Vector3.BACK)
+		_press(game, KEY_Q)
+		_visit(game, point + Vector3.FORWARD)
+	if not _expect(orbit.route_step == 5 and game.gate_active, "scanning and crossing five signals in sequence opens the exit"):
+		return false
+	_exit_sector(game)
+	game._primary()
+	game._primary()
+	orbit = game.blind_orbit
+	for point in orbit.RECOVERY:
+		_visit(game, point + Vector3.BACK)
+		_press(game, KEY_Q)
+		_press(game, KEY_F)
+		if not _expect(orbit.towing(), "cargo scanner and tractor attach a physical object"):
+			return false
+		_press(game, KEY_SPACE)
+		if not _expect(game.dash_remaining == 0.0, "towing prevents dash"):
+			return false
+		_visit(game, orbit.dock.position - Vector3.BACK)
+		for frame in range(70):
+			game._physics_process(0.1)
+		if not _expect(not orbit.towing(), "cargo reaches the dock under the tether"):
+			return false
+	if not _expect(game.gate_active and orbit.found.size() == 3, "three physical deliveries open the evacuation exit"):
+		return false
+	_exit_sector(game)
+	game._primary()
+	game._primary()
+	orbit = game.blind_orbit
+	if not _expect(6 in game.expedition.archive and 8 in game.expedition.archive, "delivered records persist at the next checkpoint"):
+		return false
+	for frame in range(450):
+		game._physics_process(0.1)
+		if game.mode == GameMode.LOST:
+			break
+	if not _expect(game.mode == GameMode.LOST and not game.gate_active, "unopposed raiders disable the convoy and prevent evacuation"):
+		return false
+	game._primary()
+	orbit = game.blind_orbit
+	if not _expect(game.mode == GameMode.PLAYING and orbit.leg == 0 and orbit.capsules[0]["hp"] == 4 and orbit.raiders.size() == 1, "checkpoint retry restores the convoy and its first attack"):
+		return false
+	for step in range(500):
+		var lead: Node3D = orbit.capsules[1]["node"]
+		if not orbit.raiders.is_empty():
+			var drone: Node3D = orbit.raiders[0]["node"]
+			var point := drone.position + Vector3.BACK * 2.8
+			if point.distance_to(lead.position) > 12.0:
+				point = drone.position.move_toward(lead.position, 2.8)
+			var direction := drone.position - point
+			game.ship.rotation.y = atan2(-direction.x, -direction.z)
+			game.pressed[KEY_CTRL] = true
+			game.player.position = point
+		else:
+			game.player.position = lead.position + Vector3.BACK * 2.0
+		game.player.velocity = Vector3.ZERO
+		game._physics_process(0.1)
+		if game.gate_active or game.mode == GameMode.LOST:
+			break
+	game.pressed.erase(KEY_CTRL)
+	if not _expect(game.gate_active and game.objective_progress >= 2 and orbit.leg == 3, "pulse fire intercepts the raiders and the surviving convoy reaches the dock"):
+		return false
+	_exit_sector(game)
+	var checkpoint := ConfigFile.new()
+	return _expect(game.mode == GameMode.INTERMISSION and checkpoint.load(game.SAVE_PATH) == OK and checkpoint.get_value("campaign", "checkpoint") == 6 and 9 in checkpoint.get_value("expedition", "archive"), "exit saves chapter two and the convoy transmission")
+
 func _run() -> void:
 	var game: Variant = GAME_SCENE.instantiate()
 	root.add_child(game)
@@ -207,8 +287,10 @@ func _run() -> void:
 	if not _expect(game.mode == GameMode.INTERMISSION, "leaving Orion completes Silent Edge"):
 		return
 
+	if not _blind_orbit(game):
+		return
 	game._primary()
-	for mission in range(3, 15):
+	for mission in range(6, 15):
 		game.mission_index = mission
 		game._start_mission()
 		game.enemies.clear()

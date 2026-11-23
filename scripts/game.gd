@@ -2,9 +2,10 @@ extends "res://scripts/visual_mesh.gd"
 
 const SilentEdge = preload("res://scripts/levels/silent_edge.gd")
 const Expedition = preload("res://scripts/levels/edge_expedition.gd")
+const BlindOrbit = preload("res://scripts/levels/blind_orbit.gd")
 
 enum Mode { MENU, BRIEFING, PLAYING, PAUSED, INTERMISSION, WON, LOST, JOURNAL, UPGRADES }
-enum Objective { REPAIR, RECOVER, DEFEND }
+enum Objective { REPAIR, RECOVER, DEFEND, ORBIT }
 
 const MISSION_COUNT := 15
 const PLAYER_SPEED := 11.0
@@ -18,9 +19,9 @@ const BRIEFS := [
 	"Лира: «Пять узлов пропали за один цикл. Начнём с внешнего маяка — там ещё теплится питание».",
 	"В обломках найдены кристаллы памяти. Каждый хранит фрагмент последней передачи экипажа.",
 	"Собери аварийный маяк. Ответ приходит не с Земли — он повторяет твой собственный сигнал.",
-	"Орион выключили вручную. Кто-то оставил маршрут через слепой пояс.",
-	"Корпус «Меридиана» разорван изнутри. Найди ячейки питания и не задерживайся у обломков.",
-	"Защити эвакуационный коридор. Лира слышит капсулы, хотя датчики показывают пустоту.",
+	"В записи с Ориона Надя Вейл оставила цепочку коротких импульсов. Обычная карта здесь бесполезна: радиошум заливает весь пояс. Лира сможет вычленять сигналы по одному, пока ты ведёшь «Кеплер» между обломками.",
+	"Маршрут Вейл вывел нас к корпусу «Меридиана». Три сигнала идут от разнесённых обломков. Если удастся вытащить регистратор, блок отключения и навигационный пакет, мы узнаем, куда ушёл конвой и зачем экипаж обесточил сеть.",
+	"В пакете «Меридиана» был резервный курс. На его частоте ответили три спасательные капсулы. Их передатчики меняют код на каждый запрос: это живой ответ. Проводи капсулы до приёмной зоны, пока дроны пытаются закрыть коридор.",
 	"В журнале капитана Нади: «Мы выключили сеть сами. Не отвечайте голосу в канале».",
 	"Охотники не атакуют маяк — они заслоняют его. Отключи карантинные узлы.",
 	"В капсулах остались люди в анабиозе. Найди энергоячейки, пока защита станции держится.",
@@ -34,6 +35,8 @@ const BRIEFS := [
 const PALETTE := [Color("#4be0cc"), Color("#7dcfff"), Color("#c69cff"), Color("#ffac82"), Color("#f4e28c")]
 
 var expedition: Expedition
+var blind_orbit: BlindOrbit
+var orbit_start_score := 0
 var archive_page := 0
 var mouse_fire := false
 var mode := Mode.MENU
@@ -101,7 +104,7 @@ func _ready() -> void:
 			preview_mode = argument.trim_prefix("--capture-mode=")
 	if not preview_path.is_empty():
 		if not preview_menu:
-			mission_index = 0
+			mission_index = {"navigation": 3, "towing": 4, "convoy": 5}.get(preview_mode, 0)
 			_start_mission()
 			if not preview_mode.is_empty():
 				_configure_preview()
@@ -112,6 +115,8 @@ func _exit_tree() -> void:
 		sound_player.stop()
 
 func _capture_preview() -> void:
+	if is_instance_valid(blind_orbit):
+		await _capture_blind_orbit()
 	if preview_mode in ["cargo", "combat", "uplink", "workshop", "archive"]:
 		await _capture_expedition_demo()
 	if preview_mode == "gameplay" and sound_enabled:
@@ -178,8 +183,28 @@ func _capture_expedition_demo() -> void:
 			_update_objectives()
 			_show(Mode.JOURNAL)
 
+func _capture_blind_orbit() -> void:
+	set_physics_process(false)
+	match preview_mode:
+		"navigation":
+			blind_orbit.scan()
+			blind_orbit.tick(0.0)
+		"towing":
+			player.position = blind_orbit.RECOVERY[0] + Vector3(0, 0, 2)
+			blind_orbit.scan()
+			blind_orbit.interact()
+			blind_orbit.tick(0.1)
+		"convoy":
+			player.position = Vector3(0, 0, -13)
+			for frame in range(45):
+				blind_orbit.tick(0.1)
+	camera.reset_to(player.position)
+	_update_hud()
+
 func _configure_preview() -> void:
 	get_window().size = Vector2i(1280, 800)
+	if is_instance_valid(blind_orbit):
+		return
 	if preview_mode == "flight":
 		pressed[KEY_W] = true
 		pressed[KEY_D] = true
@@ -398,11 +423,16 @@ func _show(next_mode: int) -> void:
 			ui_button.text = "ВЫЛЕТЕТЬ"
 		Mode.JOURNAL:
 			ui_title.text = "АРХИВ «КЕПЛЕРА»"
-			if expedition.archive.is_empty():
+			var entries := expedition.archive.duplicate()
+			if is_instance_valid(blind_orbit):
+				for index in blind_orbit.archive_entries():
+					if index not in entries:
+						entries.append(index)
+			if entries.is_empty():
 				ui_text.text = "В журнале пока нет записей. Ищи кристаллы памяти в секторе."
 			else:
-				archive_page = clampi(archive_page, 0, expedition.archive.size() - 1)
-				ui_text.text = "ЗАПИСЬ %d/%d\n\n%s" % [archive_page + 1, expedition.archive.size(), Expedition.LOGS[expedition.archive[archive_page]]]
+				archive_page = clampi(archive_page, 0, entries.size() - 1)
+				ui_text.text = "ЗАПИСЬ %d/%d\n\n%s" % [archive_page + 1, entries.size(), Expedition.LOGS[entries[archive_page]]]
 			ui_hint.text = "← / → листать · J / Esc закрыть"
 			ui_button.text = "ВЕРНУТЬСЯ В ПОЛЁТ"
 		Mode.UPGRADES:
@@ -452,6 +482,8 @@ func _primary() -> void:
 		Mode.PAUSED, Mode.JOURNAL, Mode.UPGRADES:
 			_show(Mode.PLAYING)
 		Mode.LOST:
+			if _chapter() == 1:
+				score = orbit_start_score
 			if _chapter() == 0:
 				var previous := ConfigFile.new()
 				previous.load(SAVE_PATH)
@@ -492,23 +524,32 @@ func _start_mission() -> void:
 	player.velocity = Vector3.ZERO
 	ship.rotation = Vector3.ZERO
 	camera.reset_to(player.position)
-	objective_kind = mission_index % 3
+	objective_kind = Objective.ORBIT if _chapter() == 1 else mission_index % 3
 	objective_goal = 6 if objective_kind == Objective.RECOVER else (90 if objective_kind == Objective.DEFEND else 3 + _chapter())
 	if mission_index == 2:
 		objective_goal = 1
 	_clear_arena()
 	orbit.set_chapter(_chapter(), PALETTE[_chapter()])
-	_spawn_landmarks()
-	_spawn_obstacles(8 + _chapter() * 2)
-	_spawn_objectives()
-	_spawn_enemies(2 + _chapter())
+	if _chapter() == 1:
+		orbit_start_score = score
+		blind_orbit = BlindOrbit.new()
+		arena.add_child(blind_orbit)
+		blind_orbit.setup(self, mission_index - 3)
+	else:
+		_spawn_landmarks()
+		_spawn_obstacles(8 + _chapter() * 2)
+		_spawn_objectives()
+		_spawn_enemies(2 + _chapter())
 	if _chapter() == 0:
 		expedition.start_sector()
 	_show(Mode.PLAYING)
+	if is_instance_valid(blind_orbit):
+		blind_orbit.intro()
 	if _chapter() == 0:
 		comms.text = ["ЛИРА: Q сканирует сектор. Ищи ячейки, чтобы запитать три маяка.", "ЛИРА: собери шесть записей. J откроет архив. Сигнал капсулы — дополнительная цель.", "ЛИРА: Hunter готовит залп, Wisp глушит связь. Ctrl — выстрел по курсу, Space — уклонение."][mission_index]
 
 func _clear_arena() -> void:
+	blind_orbit = null
 	for node in arena.get_children():
 		arena.remove_child(node)
 		node.queue_free()
@@ -649,8 +690,12 @@ func _physics_process(delta: float) -> void:
 	invulnerability = maxf(0.0, invulnerability - delta)
 	var move := Vector2(float(_down(KEY_D) or _down(KEY_RIGHT)) - float(_down(KEY_A) or _down(KEY_LEFT)), float(_down(KEY_S) or _down(KEY_DOWN)) - float(_down(KEY_W) or _down(KEY_UP))).normalized()
 	var speed := DASH_SPEED + float(module_rank) * 2.0 if dash_remaining > 0 else PLAYER_SPEED + float(module_rank) * 0.75 + float(expedition.modules[1]) * 1.15
-	player.velocity.x = move_toward(player.velocity.x, move.x * speed, 35.0 * delta)
-	player.velocity.z = move_toward(player.velocity.z, move.y * speed, 35.0 * delta)
+	var towing := is_instance_valid(blind_orbit) and blind_orbit.towing()
+	var acceleration := 19.0 if towing else 35.0
+	if towing:
+		speed *= 0.60
+	player.velocity.x = move_toward(player.velocity.x, move.x * speed, acceleration * delta)
+	player.velocity.z = move_toward(player.velocity.z, move.y * speed, acceleration * delta)
 	if dash_remaining > 0:
 		player.velocity.x = dash_direction.x * (DASH_SPEED + float(module_rank) * 2.0)
 		player.velocity.z = dash_direction.z * (DASH_SPEED + float(module_rank) * 2.0)
@@ -666,8 +711,15 @@ func _physics_process(delta: float) -> void:
 	ship.rotation.z = lerpf(ship.rotation.z, bank, 1.0 - exp(-7.0 * delta))
 	ship.rotation.x = lerpf(ship.rotation.x, clampf(-forward * 0.009, -0.18, 0.18), 1.0 - exp(-6.0 * delta))
 	camera.follow(player.position, player.velocity, delta)
-	_update_enemies(delta)
-	_update_objectives()
+	if is_instance_valid(blind_orbit):
+		blind_orbit.tick(delta)
+		if mode != Mode.PLAYING:
+			return
+		if _down(KEY_CTRL) or mouse_fire:
+			blind_orbit.fire()
+	else:
+		_update_enemies(delta)
+		_update_objectives()
 	if _chapter() == 0:
 		expedition.tick(delta)
 		if _down(KEY_CTRL) or mouse_fire:
@@ -710,7 +762,7 @@ func _relay_marker(target: Node3D, index: int) -> void:
 func _process(_delta: float) -> void:
 	if mode != Mode.PLAYING:
 		return
-	if _once(KEY_SPACE) and dash_cooldown <= 0:
+	if _once(KEY_SPACE) and dash_cooldown <= 0 and not (is_instance_valid(blind_orbit) and blind_orbit.towing()):
 		var move := Vector3(float(_down(KEY_D) or _down(KEY_RIGHT)) - float(_down(KEY_A) or _down(KEY_LEFT)), 0, float(_down(KEY_S) or _down(KEY_DOWN)) - float(_down(KEY_W) or _down(KEY_UP)))
 		dash_direction = move.normalized() if move.length_squared() > 0.01 else Vector3(-sin(ship.rotation.y), 0, -cos(ship.rotation.y))
 		dash_remaining = DASH_DURATION + float(expedition.modules[2]) * 0.035
@@ -727,6 +779,12 @@ func _process(_delta: float) -> void:
 			return
 		if _once(KEY_U):
 			_show(Mode.UPGRADES)
+			return
+	if is_instance_valid(blind_orbit):
+		if _once(KEY_Q):
+			blind_orbit.scan()
+		if _once(KEY_J):
+			_show(Mode.JOURNAL)
 			return
 	if _once(KEY_F):
 		_interact()
@@ -772,6 +830,9 @@ func _update_objectives() -> void:
 		_activate_gate()
 
 func _interact() -> void:
+	if is_instance_valid(blind_orbit):
+		blind_orbit.interact()
+		return
 	if _chapter() == 0:
 		expedition.interact()
 		return
@@ -798,6 +859,7 @@ func _activate_gate() -> void:
 	if gate_active:
 		return
 	gate_active = true
+	gate.show()
 	gate_ring.material_override = _mat(Color("#84f3d9"), 0.15, 0, true)
 
 func _take_hit() -> void:
@@ -810,7 +872,7 @@ func _take_hit() -> void:
 	if player.position.length_squared() > 0.01:
 		player.velocity = player.position.normalized() * 7.0
 	if lives <= 0:
-		if _chapter() != 0:
+		if _chapter() > 1:
 			_save(mission_index)
 		_show(Mode.LOST)
 
@@ -823,6 +885,8 @@ func _finish_mission() -> void:
 	score += 500 + int(maxf(0.0, 120.0 - mission_clock) * 4.0)
 	if _chapter() == 0:
 		expedition.alloy += 2
+	if is_instance_valid(blind_orbit):
+		blind_orbit.commit_archive()
 	_save(mission_index + 1)
 	_show(Mode.INTERMISSION)
 
@@ -831,6 +895,9 @@ func _objective_text() -> String:
 		0: return "просканируй сектор, найди ячейки, запитай маяки и удержи связь до окончания каждой передачи."
 		1: return "извлеки записи экипажа из шести кристаллов. Отметь пропавшую капсулу, если увидишь её сигнал."
 		2: return "сбей Hunter и Wisp, очисти канал «Ориона» и удержи связь шесть секунд."
+		3: return "найди пять сигналов (Q) и пройди сквозь ворота по порядку."
+		4: return "просканируй сектор (Q), зацепи каждую находку (F) и доставь её в док."
+		5: return "держись рядом с конвоем и отбивай атаки (Ctrl или ЛКМ). Доставь хотя бы две капсулы."
 	match objective_kind:
 		Objective.REPAIR:
 			return "найди и активируй %d узла (F рядом с узлом), затем долети до портала" % (3 + _chapter())
@@ -852,6 +919,9 @@ func _update_hud() -> void:
 	hud.text = "ГЛАВА %d/5 · МИССИЯ %02d/15   %s   %s   КОРПУС %d/3   СЧЁТ %06d" % [_chapter() + 1, mission_index + 1, TITLES[mission_index], goal, lives, score]
 	if _chapter() == 0:
 		hud.text = hud.text.replace("КОРПУС %d/3" % lives, "КОРПУС %d/%d" % [lives, expedition.hull()]) + "\n" + expedition.hud_line()
+
+	if is_instance_valid(blind_orbit):
+		hud.text = hud.text.replace("КОРПУС %d/3" % lives, "КОРПУС %d/%d" % [lives, expedition.hull()]) + "\n" + blind_orbit.hud_line()
 
 func _on_focus_lost() -> void:
 	if preview_path.is_empty() and mode == Mode.PLAYING:
