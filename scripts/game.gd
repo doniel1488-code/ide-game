@@ -116,7 +116,7 @@ func _exit_tree() -> void:
 
 func _capture_preview() -> void:
 	if is_instance_valid(blind_orbit):
-		await _capture_blind_orbit()
+		_capture_blind_orbit()
 	if preview_mode in ["cargo", "combat", "uplink", "workshop", "archive"]:
 		await _capture_expedition_demo()
 	if preview_mode == "gameplay" and sound_enabled:
@@ -190,7 +190,8 @@ func _capture_blind_orbit() -> void:
 			blind_orbit.scan()
 			blind_orbit.tick(0.0)
 		"towing":
-			player.position = blind_orbit.RECOVERY[0] + Vector3(0, 0, 2)
+			player.position = blind_orbit.RECOVERY[0] + Vector3(2.4, 0, 0)
+			ship.rotation.y = -PI / 2
 			blind_orbit.scan()
 			blind_orbit.interact()
 			blind_orbit.tick(0.1)
@@ -199,6 +200,9 @@ func _capture_blind_orbit() -> void:
 			for frame in range(45):
 				blind_orbit.tick(0.1)
 	camera.reset_to(player.position)
+	if preview_mode == "towing":
+		camera.position = player.position + Vector3(1, 9, 9)
+		camera.look_at(player.position + Vector3(-1.2, 0, 0))
 	_update_hud()
 
 func _configure_preview() -> void:

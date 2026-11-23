@@ -183,7 +183,8 @@ jobs:
           LUMEN DRIFT — WINDOWS x64
 
           Распакуйте архив и запустите LumenDrift.exe. Godot, браузер, Python и Node.js не нужны.
-          Управление: WASD/стрелки — полёт; Space — рывок; F — действие; Esc — пауза; M — звук.
+          Управление: WASD/стрелки — полёт, Space — рывок, F — действие и захват груза, Q — сканирование.
+          Ctrl/ЛКМ — огонь по курсу, J — архив, Esc — пауза, M — звук.
           Windows 10/11 x64, видеодрайвер OpenGL 3.3.
           Прогресс хранится в профиле пользователя Windows.
           '@ | Set-Content -Path (Join-Path $package 'README.txt') -Encoding utf8
